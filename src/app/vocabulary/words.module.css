@@ -1,0 +1,82 @@
+.tools {
+  display: flex;
+  gap: 16px;
+  color: var(--muted);
+}
+
+.popover {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px;
+}
+
+.card {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 16px;
+  border-left: 4px solid var(--danger);
+  text-align: left;
+  width: 100%;
+}
+
+.ok {
+  border-left-color: var(--ok);
+}
+
+.error {
+  border-left-color: var(--danger);
+}
+
+.card h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.card p {
+  margin: 8px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.hit {
+  color: var(--word);
+  font-weight: 600;
+}
+
+.stats {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.statsOk {
+  color: var(--ok);
+}
+
+.statsError {
+  color: var(--danger);
+}
+
+.fab {
+  position: absolute;
+  right: 24px;
+  bottom: 96px;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 28px;
+  background: var(--accent);
+  color: white;
+  display: grid;
+  place-items: center;
+  box-shadow: var(--shadow);
+}
+
+.range {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+@media (min-width: 1024px) {
+  .fab { bottom: 24px; }
+}

@@ -1,0 +1,47 @@
+.seg {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--surface);
+  border-radius: 8px;
+}
+
+.seg button {
+  flex: 1;
+  height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.seg button.on {
+  background: var(--accent);
+  color: white;
+}
+
+.toggle {
+  width: 42px;
+  height: 24px;
+  border-radius: 12px;
+  border: 0;
+  background: var(--border);
+  padding: 2px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.toggleOn {
+  background: var(--accent);
+  justify-content: flex-end;
+}
+
+.toggle i {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  display: block;
+}

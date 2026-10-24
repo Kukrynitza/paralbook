@@ -1,0 +1,17 @@
+.svg {
+  display: block;
+  margin: 10px auto 0;
+}
+
+.arc {
+  animation: ring-draw 900ms ease forwards;
+}
+
+@keyframes ring-draw {
+  from { stroke-dashoffset: var(--ring-len); }
+  to { stroke-dashoffset: var(--ring-to); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arc { animation: none; }
+}

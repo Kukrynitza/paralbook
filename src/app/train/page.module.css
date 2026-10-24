@@ -1,0 +1,131 @@
+.done {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 16px;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.metric {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+.metric b {
+  display: block;
+  font-size: 32px;
+}
+
+.deck {
+  position: relative;
+  margin: 28px 20px 12px;
+  perspective: 1200px;
+}
+
+.face {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 28px 20px;
+  text-align: center;
+  min-height: 280px;
+  transition: background 480ms ease;
+}
+
+.peek {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 18px;
+  z-index: 0;
+  min-height: 260px;
+  transform: translateY(16px) scale(0.97);
+  pointer-events: none;
+}
+
+.peek h2 {
+  color: var(--muted);
+  font-size: 22px;
+}
+
+.flipper {
+  position: relative;
+  z-index: 1;
+  transform-style: preserve-3d;
+}
+
+.enter { animation: card-in 420ms ease; }
+.leaveNo { animation: card-toss-no 480ms ease forwards; }
+.leaveYes { animation: card-toss-yes 480ms ease forwards; }
+.leaveNo .face { background: color-mix(in srgb, var(--danger) 24%, var(--surface)); }
+.leaveYes .face { background: color-mix(in srgb, var(--ok) 24%, var(--surface)); }
+
+.flip {
+  position: relative;
+  min-height: 280px;
+  transform-style: preserve-3d;
+  transition: transform 520ms ease;
+}
+
+.flipped { transform: rotateY(180deg); }
+
+.side {
+  margin: 0;
+  backface-visibility: hidden;
+}
+
+.back {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(180deg);
+}
+
+.flipped .side:not(.back) { pointer-events: none; }
+.flip:not(.flipped) .back { pointer-events: none; }
+
+.face h2 {
+  margin: 0;
+  font-size: 32px;
+}
+
+.reveal {
+  min-height: 44px;
+  margin: 8px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: reveal 220ms ease;
+}
+
+@keyframes card-in {
+  from { transform: translateY(18px) scale(0.97); }
+  to { transform: none; }
+}
+
+@keyframes card-toss-no {
+  to { opacity: 0; transform: translate(-88px, 168px) rotate(-18deg); }
+}
+
+@keyframes card-toss-yes {
+  to { opacity: 0; transform: translate(88px, 168px) rotate(18deg); }
+}
+
+@keyframes reveal {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter, .leaveNo, .leaveYes, .reveal { animation: none; }
+  .flip, .face { transition: none; }
+}
