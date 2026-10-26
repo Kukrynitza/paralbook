@@ -3,6 +3,7 @@
 import database from '@/modules/database'
 import userId from '@/sorse/userId'
 import { vocabById } from '@/sorse/query'
+import { HINT_MAX } from '@/sorse/hint'
 import type { VocabItem } from '@/sorse/types'
 
 export default async function updateVocabulary(itemId: string, patch: { hint?: string; mastered?: boolean }): Promise<VocabItem> {
@@ -24,6 +25,9 @@ export default async function updateVocabulary(itemId: string, patch: { hint?: s
     const hint = patch.hint.trim()
     if (!hint) {
       throw new Error('Напишите подсказку перед сохранением')
+    }
+    if (hint.length > HINT_MAX) {
+      throw new Error(`Подсказка короткая, до ${HINT_MAX} символов`)
     }
     next.hint = hint
   }

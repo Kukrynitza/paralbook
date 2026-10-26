@@ -10,7 +10,8 @@ import selectWord from '@/actions/Words/selectWord'
 import addVocabulary from '@/actions/Vocabulary/addVocabulary'
 import { type DictEntry, type ReadPayload } from '@/sorse/types'
 import { useUi } from '@/contexts/AuthContext'
-import pagerStyles from '@/components/Pager/Pager.module.css'
+import WordArticle from '@/components/WordArticle/WordArticle'
+import Pager from '@/components/Pager/Pager'
 import styles from './page.module.css'
 
 export default function Page() {
@@ -162,61 +163,41 @@ export default function Page() {
           </div>
         ) : null}
       </div>
-      <div className={`${pagerStyles.pager} ${styles.pager}`}>
-        <button type="button" disabled={page <= 0 || finished} onClick={() => go(page - 1)}>
-          ←
-        </button>
-        <button type="button" className={pagerStyles.on}>
-          {page + 1}
-        </button>
-        <button type="button" disabled={finished} onClick={() => go(page + 1)}>
-          →
-        </button>
-      </div>
+      <Pager
+        className={styles.pager}
+        page={page + 1}
+        pages={data.pageCount}
+        prevDisabled={page <= 0 || finished}
+        nextDisabled={finished}
+        onPage={(next) => {
+          if (!finished) go(next - 1)
+        }}
+      />
       {pick?.phase === 'popup' && entry ? (
         <div className={styles.dim} onClick={() => setPick({ ...pick, phase: 'gloss' })}>
           <div className={styles.sheet} onClick={(event) => event.stopPropagation()}>
             <div className={styles.handle} />
-            <div className={styles.head}>
-              <div style={{ display: 'flex', gap: 12 }}>
+            <WordArticle
+              lemma={entry.lemma}
+              ipa={entry.ipa}
+              rank={entry.rank}
+              senses={entry.senses}
+              leading={
                 <button className="icon-btn" onClick={addWord} aria-label="В словарь" style={{ color: saved ? 'var(--accent)' : 'var(--muted)' }}>
                   <Star size={22} fill={saved ? 'currentColor' : 'none'} />
                 </button>
-                <div>
-                  <h2>{entry.lemma}</h2>
-                  <div className={styles.ipa}>{entry.ipa}</div>
+              }
+              trailing={
+                <div className="gap8">
+                  <button className="icon-btn" onClick={speak} aria-label="Произнести">
+                    <Volume2 size={20} />
+                  </button>
+                  <button className="icon-btn" onClick={() => setPick({ ...pick, phase: 'gloss' })} aria-label="Закрыть">
+                    <X size={20} />
+                  </button>
                 </div>
-              </div>
-              <div className="gap8">
-                <button className="icon-btn" onClick={speak} aria-label="Произнести">
-                  <Volume2 size={20} />
-                </button>
-                <button className="icon-btn" onClick={() => setPick({ ...pick, phase: 'gloss' })} aria-label="Закрыть">
-                  <X size={20} />
-                </button>
-              </div>
-            </div>
-            <div className="gap8" style={{ padding: '0 20px 12px' }}>
-              <span className="chip on">RU</span>
-              <span className="chip">#{entry.rank}</span>
-              <span className="chip">IPA</span>
-              <span className="chip">Поиск</span>
-            </div>
-            {entry.senses.map((sense, index) => (
-              <div className={styles.sense} key={`${sense.pos}-${sense.text}-${index}`}>
-                {index === 0 || entry.senses[index - 1].pos !== sense.pos ? <span className={styles.pos}>{sense.pos}</span> : null}
-                <p className={styles.tr}>— {sense.text}</p>
-                {sense.examples.length ? (
-                  <ul>
-                    {sense.examples.map((example) => (
-                      <li key={example.textEn + (example.textRu ?? '')}>
-                        {example.textRu ? `${example.textEn} — ${example.textRu}` : example.textEn}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
-            ))}
+              }
+            />
           </div>
         </div>
       ) : null}

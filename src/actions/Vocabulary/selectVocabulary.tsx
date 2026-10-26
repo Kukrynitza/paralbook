@@ -38,7 +38,10 @@ export default async function selectVocabulary(query: string, status: string): P
   if (status === 'error') {
     rowsQuery = rowsQuery.where('userWords.wrong', '>', 0).whereRef('userWords.wrong', '>=', 'userWords.correct')
   }
-  const rows = await rowsQuery.orderBy('userWords.lemma', 'asc').execute()
+  const ordered = status === 'sum'
+    ? rowsQuery.orderBy(sql`user_words.correct + user_words.wrong`, 'desc').orderBy('userWords.lemma', 'asc')
+    : rowsQuery.orderBy('userWords.lemma', 'asc')
+  const rows = await ordered.execute()
   return {
     items: rows.map((row) => ({
       id: row.id,

@@ -1,0 +1,52 @@
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 20px 12px;
+}
+
+.title {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+
+.head h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.ipa {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pos {
+  display: inline-flex;
+  height: 21px;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sense {
+  padding: 0 20px 16px;
+}
+
+.tr {
+  margin: 8px 0;
+}
+
+.sense li {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.extra {
+  padding: 0 20px 8px;
+}

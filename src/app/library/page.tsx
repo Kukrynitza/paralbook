@@ -139,8 +139,7 @@ export default function Page() {
           ))}
         </div>
       )}
-      {list && !empty && list.pages > 1 ? <Pager page={list.page} pages={list.pages} onPage={setPage} /> : null}
-      {list && !empty && list.pages === 1 ? <Pager page={1} pages={1} onPage={setPage} /> : null}
+      {list && !empty ? <Pager page={list.page} pages={list.pages} onPage={setPage} /> : null}
     </div>
   )
 }

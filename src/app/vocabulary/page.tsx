@@ -1,5 +1,5 @@
 'use client'
-
+import Pager from '@/components/Pager/Pager'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Check, Clock, Eye, Filter, Play, Search, SlidersHorizontal } from 'lucide-react'
@@ -7,6 +7,7 @@ import seedVocabulary from '@/actions/Vocabulary/seedVocabulary'
 import selectVocabulary from '@/actions/Vocabulary/selectVocabulary'
 import { type VocabItem } from '@/sorse/types'
 import { useAuth, useUi } from '@/contexts/AuthContext'
+import { sideColor } from '@/sorse/answerColor'
 import { markSeedAsked, readTraining, seedAskedFor, writeTraining, type TrainSetup } from '@/sorse/prefs'
 import styles from './words.module.css'
 
@@ -23,13 +24,15 @@ function mark(example: string, lemma: string) {
 }
 
 export default function Page() {
+  const [page, setPage] = useState(0)
   const { user } = useAuth()
   const { notify } = useUi()
   const [items, setItems] = useState<VocabItem[] | null>(null)
+  const [pageItems, setPageItems] = useState<VocabItem[] | null>(null)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
-  const [status, setStatus] = useState('all')
+  const [status, setStatus] = useState('sum')
   const [confirmSeed, setConfirmSeed] = useState(false)
   const [trainOpen, setTrainOpen] = useState(false)
   const [train, setTrain] = useState<TrainSetup>(() => readTraining())
@@ -46,11 +49,19 @@ export default function Page() {
       if (!active) return
       setItems(data.items)
       if (data.items.length === 0 && !query && status === 'all' && user && !seedAskedFor(user.cefr)) setConfirmSeed(true)
-    })
+      })
+    setPage(0)
     return () => {
       active = false
     }
   }, [query, status, user])
+
+  useEffect(() => {
+    setPageItems(items?.slice(page * 30, (page + 1) * 30) || null)
+  },[page, items])
+
+  useEffect(() => {
+  },[items?.length])
 
   function dismissSeed() {
     if (user) markSeedAsked(user.cefr)
@@ -75,8 +86,7 @@ export default function Page() {
     notify(result.added.length ? 'Слова загружены' : 'Эти слова уже в словаре')
   }
 
-  if (!items) return <p className="pad muted">Загрузка…</p>
-
+  if (!pageItems) return <p className="pad muted">Загрузка…</p>
   return (
     <div>
       <header className="header">
@@ -139,6 +149,7 @@ export default function Page() {
             ['all', 'Все'],
             ['ok', 'Верно'],
             ['error', 'Ошибки'],
+            ['sum', 'Сумма'],
           ].map(([id, label]) => (
             <button key={id} className={status === id ? 'chip on' : 'chip'} onClick={() => setStatus(id)}>
               {label}
@@ -146,7 +157,7 @@ export default function Page() {
           ))}
         </div>
       ) : null}
-      {items.length === 0 && !query && status === 'all' ? (
+      {pageItems?.length === 0 && !query && status === 'all' ? (
         <div className="empty">
           <h2>Словарь пуст</h2>
           <p>Загрузите слова своего уровня или добавляйте их из текста.</p>
@@ -157,9 +168,10 @@ export default function Page() {
           </button>
         </div>
       ) : (
+        <ul>
         <div className="list">
-          {items.map((item) => (
-            <Link key={item.id} href={`/vocabulary/${item.id}`} className={item.tone === 'ok' ? `${styles.card} ${styles.ok}` : `${styles.card} ${styles.error}`}>
+          {pageItems?.map((item) => (
+            <Link key={item.id} href={`/vocabulary/${item.id}`} className={item.tone === 'ok' ? `${styles.card} ${styles.ok}` : `${styles.card} ${styles.error}`} style={sideColor(item.correct, item.wrong)}>
               <div className="row">
                 <h3>{item.lemma}</h3>
                 {item.tone === 'ok' ? <Check size={16} color="var(--ok)" /> : <Clock size={16} color="var(--danger)" />}
@@ -171,8 +183,15 @@ export default function Page() {
             </Link>
           ))}
         </div>
+        <Pager
+        className={styles.pager}
+        page={page + 1}
+        pages={items?.length ? Math.ceil(items.length / 30) : 0}
+        onPage={(next) => setPage(next - 1)}
+      />
+      </ul>
       )}
-      {items.length > 0 ? (
+      {pageItems?.length > 0 ? (
         <Link className={styles.fab} href="/train" aria-label="Тренировка">
           <Play size={24} fill="currentColor" />
         </Link>

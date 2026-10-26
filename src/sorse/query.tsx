@@ -1,5 +1,6 @@
 import { sql, type Kysely, type Transaction } from 'kysely'
 import type { Database } from '@/modules/database'
+import { shortHint } from '@/sorse/hint'
 import type { Friend, LibraryItem, SessionCard, VocabItem } from '@/sorse/types'
 
 export const PAGE_SIZE = 4
@@ -153,7 +154,7 @@ export async function ensureWord(db: Db, userId: string, lemma: string, countTod
   if (existing) return existing.id
   const created = await db
     .insertInto('userWords')
-    .values({ userId, lemma: known.lemma, hint: known.hint ?? '', correct: 0, wrong: 0, mastered: false })
+    .values({ userId, lemma: known.lemma, hint: shortHint(known.hint ?? ''), correct: 0, wrong: 0, mastered: false })
     .returning('id')
     .executeTakeFirstOrThrow()
   if (countToday) await addActivity(db, userId, 0, 1)
