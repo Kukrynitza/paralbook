@@ -28,7 +28,7 @@ export default function Page() {
     selectVocabularyItem(id).then((value) => {
       if (!active) return
       setItem(value)
-      setHint(value.hint)
+      setHint(value.hint ?? '')
     })
     return () => {
       active = false

@@ -164,7 +164,7 @@ export default function Page() {
                 <h3>{item.lemma}</h3>
                 {item.tone === 'ok' ? <Check size={16} color="var(--ok)" /> : <Clock size={16} color="var(--danger)" />}
               </div>
-              <p>{mark(item.example, item.lemma)}</p>
+              <p>{item.example ? mark(item.example, item.lemma) : item.translation}</p>
               <div className={item.tone === 'ok' ? `${styles.stats} ${styles.statsOk}` : `${styles.stats} ${styles.statsError}`}>
                 Верно: {item.correct} · Ошибки: {item.wrong}
               </div>

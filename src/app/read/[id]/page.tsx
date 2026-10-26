@@ -23,7 +23,7 @@ export default function Page() {
   const [page, setPage] = useState(0)
   const [progress, setProgress] = useState(0)
   const [finished, setFinished] = useState(false)
-  const [pick, setPick] = useState<{ index: number; lemma: string; gloss?: string; align?: number; phase: 'gloss' | 'popup' } | null>(null)
+  const [pick, setPick] = useState<{ index: number; lemma: string; translation?: string; align?: number; phase: 'gloss' | 'popup' } | null>(null)
   const [entry, setEntry] = useState<DictEntry | null>(null)
   const [saved, setSaved] = useState(false)
   const lineRef = useRef<HTMLDivElement>(null)
@@ -69,15 +69,15 @@ export default function Page() {
     line.scrollBy({ left: delta, behavior: reduce ? 'auto' : 'smooth' })
   }, [pick?.align, page])
 
-  async function onToken(index: number, lemma: string, gloss?: string, align?: number) {
+  async function onToken(index: number, lemma: string, translation?: string, align?: number) {
     if (pick?.index === index && pick.phase === 'gloss') {
       const word = await selectWord(lemma)
       setEntry(word)
       setSaved(false)
-      setPick({ index, lemma, gloss, align, phase: 'popup' })
+      setPick({ index, lemma, translation, align, phase: 'popup' })
       return
     }
-    setPick({ index, lemma, gloss, align, phase: 'gloss' })
+    setPick({ index, lemma, translation, align, phase: 'gloss' })
   }
 
   async function addWord() {
@@ -121,10 +121,10 @@ export default function Page() {
               </span>
             ))}
           </div>
-          {pick.gloss ? (
+          {pick.translation ? (
             <div className={styles.gloss}>
               <b>{pick.lemma}</b>
-              {pick.gloss}
+              {pick.translation}
             </div>
           ) : null}
         </div>
@@ -137,7 +137,7 @@ export default function Page() {
                 key={index}
                 type="button"
                 className={pick?.index === index ? `${styles.token} ${styles.on}` : styles.token}
-                onClick={() => onToken(index, token.lemma!, token.gloss, token.align)}
+                onClick={() => onToken(index, token.lemma!, token.translation, token.align)}
               >
                 {token.text}
               </button>
@@ -202,14 +202,16 @@ export default function Page() {
               <span className="chip">IPA</span>
               <span className="chip">Поиск</span>
             </div>
-            {entry.senses.map((sense) => (
-              <div className={styles.sense} key={sense.pos + sense.text}>
-                <span className={styles.pos}>{sense.pos}</span>
-                <p className={styles.tr}>{sense.text}</p>
+            {entry.senses.map((sense, index) => (
+              <div className={styles.sense} key={`${sense.pos}-${sense.text}-${index}`}>
+                {index === 0 || entry.senses[index - 1].pos !== sense.pos ? <span className={styles.pos}>{sense.pos}</span> : null}
+                <p className={styles.tr}>— {sense.text}</p>
                 {sense.examples.length ? (
                   <ul>
                     {sense.examples.map((example) => (
-                      <li key={example}>{example}</li>
+                      <li key={example.textEn + (example.textRu ?? '')}>
+                        {example.textRu ? `${example.textEn} — ${example.textRu}` : example.textEn}
+                      </li>
                     ))}
                   </ul>
                 ) : null}

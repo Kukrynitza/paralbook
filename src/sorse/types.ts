@@ -84,7 +84,7 @@ export type ChatMessage =
 export interface ReadToken {
   text: string
   lemma?: string
-  gloss?: string
+  translation?: string
   align?: number
 }
 
@@ -105,22 +105,21 @@ export interface ReadPayload {
 
 export interface DictEntry {
   lemma: string
-  ipa: string
-  translation: string
-  gloss: string
+  ipa: string | null
+  translation: string | null
   rank: number
-  senses: { pos: string; text: string; examples: string[] }[]
-  example: string
-  hint: string
+  senses: { pos: string; text: string; examples: { textEn: string; textRu: string | null }[] }[]
+  example: string | null
+  hint: string | null
 }
 
 export interface VocabItem {
   id: string
   lemma: string
-  ipa: string
-  translation: string
-  example: string
-  hint: string
+  ipa: string | null
+  translation: string | null
+  example: string | null
+  hint: string | null
   correct: number
   wrong: number
   mastered: boolean
@@ -129,10 +128,10 @@ export interface VocabItem {
 
 export interface SessionCard {
   lemma: string
-  ipa: string
-  translation: string
-  example: string
-  hint: string
+  ipa: string | null
+  translation: string | null
+  example: string | null
+  hint: string | null
 }
 
 export interface SessionSummary {

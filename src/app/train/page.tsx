@@ -143,7 +143,7 @@ export default function Page() {
                 <h2>{session.card.lemma}</h2>
                 <p className="muted">{session.card.ipa}</p>
                 <hr className="line" />
-                <p>{session.card.example}</p>
+                {session.card.example ? <p>{session.card.example}</p> : null}
                 <button className="btn ghost" onClick={() => setHint(true)}>
                   <Eye size={16} />
                   Показать подсказку

@@ -45,11 +45,23 @@ export default async function selectText(textId: string): Promise<ReadPayload> {
     .where('pageId', 'in', pageIds)
     .orderBy('position', 'asc')
     .execute()
-  const lemmas = [...new Set(en.flatMap((item) => (item.lemma ? [item.lemma] : [])))]
-  const glosses = lemmas.length
-    ? await database.selectFrom('lemmas').select(['lemma', 'gloss']).where('lemma', 'in', lemmas).execute()
+  const forms = [...new Set(en.map((token) => token.text.replace(/^[^A-Za-zА-Яа-яЁё]+|[^A-Za-zА-Яа-яЁё]+$/g, '').toLowerCase()).filter(Boolean))]
+  const known = forms.length
+    ? await database
+        .selectFrom('wordForms')
+        .innerJoin('lemmas', 'lemmas.lemma', 'wordForms.lemma')
+        .select(['wordForms.formNorm', 'wordForms.lemma', 'lemmas.rank', 'lemmas.translation'])
+        .where('wordForms.formNorm', 'in', forms)
+        .execute()
     : []
-  const glossByLemma = new Map(glosses.map((item) => [item.lemma, item.gloss]))
+  function resolve(form: string) {
+    const rows = known.filter((item) => item.formNorm === form)
+    const exact = rows.find((item) => item.lemma === form)
+    return exact ?? rows.reduce<(typeof rows)[number] | undefined>((best, item) => {
+      if (!best || item.rank < best.rank) return item
+      return best
+    }, undefined)
+  }
   const pageCount = pages.length
   const progress = Number(entry?.progress ?? 0)
   const page = Math.min(pageCount - 1, Math.max(0, Math.round(progress * pageCount)))
@@ -67,12 +79,16 @@ export default async function selectText(textId: string): Promise<ReadPayload> {
         .map((token): RuToken => ({ text: token.text })),
       tokens: en
         .filter((token) => token.pageId === item.id)
-        .map((token): ReadToken => ({
-          text: token.text,
-          lemma: token.lemma ?? undefined,
-          gloss: token.lemma ? glossByLemma.get(token.lemma) : undefined,
-          align: token.align ?? undefined,
-        })),
+        .map((token): ReadToken => {
+          const form = token.text.replace(/^[^A-Za-zА-Яа-яЁё]+|[^A-Za-zА-Яа-яЁё]+$/g, '').toLowerCase()
+          const known = form ? resolve(form) : undefined
+          return {
+            text: token.text,
+            lemma: known?.lemma,
+            translation: known?.translation ?? undefined,
+            align: token.align ?? undefined,
+          }
+        }),
     })),
   }
 }

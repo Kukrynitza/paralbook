@@ -55,17 +55,12 @@ export interface EnTokens {
 
 export interface Lemmas {
   lemma: string
-  ipa: string
-  translation: string
-  gloss: string
+  ipa: string | null
+  translation: string | null
   rank: number
-  example: string
-  hint: string
-}
-
-export interface LemmaLevels {
-  lemma: string
-  level: Cefr
+  example: string | null
+  hint: string | null
+  level: Cefr | null
 }
 
 export interface Senses {
@@ -74,13 +69,25 @@ export interface Senses {
   position: number
   pos: string
   text: string
+  source: string
+  updatedAt: GeneratedAlways<Date>
 }
 
 export interface SenseExamples {
   id: GeneratedAlways<string>
   senseId: string
   position: number
-  text: string
+  textEn: string
+  textRu: string | null
+  source: string
+}
+
+export interface WordForms {
+  lemma: string
+  form: string
+  formNorm: string
+  kind: string
+  source: string
 }
 
 export interface CollectionItems {
@@ -158,9 +165,9 @@ export interface Database {
   ruTokens: RuTokens
   enTokens: EnTokens
   lemmas: Lemmas
-  lemmaLevels: LemmaLevels
   senses: Senses
   senseExamples: SenseExamples
+  wordForms: WordForms
   collectionItems: CollectionItems
   votes: Votes
   userWords: UserWords

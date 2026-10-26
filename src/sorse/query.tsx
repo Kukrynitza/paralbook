@@ -153,7 +153,7 @@ export async function ensureWord(db: Db, userId: string, lemma: string, countTod
   if (existing) return existing.id
   const created = await db
     .insertInto('userWords')
-    .values({ userId, lemma: known.lemma, hint: known.hint, correct: 0, wrong: 0, mastered: false })
+    .values({ userId, lemma: known.lemma, hint: known.hint ?? '', correct: 0, wrong: 0, mastered: false })
     .returning('id')
     .executeTakeFirstOrThrow()
   if (countToday) await addActivity(db, userId, 0, 1)

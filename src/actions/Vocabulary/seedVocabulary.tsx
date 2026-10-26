@@ -14,7 +14,7 @@ export default async function seedVocabulary(): Promise<{ added: { id: string }[
     throw new Error('Нужно войти')
   }
   const lemmas = await database
-    .selectFrom('lemmaLevels')
+    .selectFrom('lemmas')
     .select('lemma')
     .where('level', '=', profile.cefr)
     .orderBy('lemma', 'asc')
