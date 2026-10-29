@@ -59,39 +59,48 @@ function dueScope(chosen: string[]) {
   return sql` and (${sql.join(parts, sql` or `)})`
 }
 
-async function freshLemmas(ownerId: string, chosen: string[], limit: number) {
+function packScope(chosen: string[], word: 'uw' | 'l') {
   const parts: RawBuilder<unknown>[] = []
-  if (chosen.includes('texts')) {
-    parts.push(sql`
-      select uw.lemma
-      from user_words uw
-      where uw.user_id = ${ownerId}
-        and uw.mastered = false
-        and ${textScope('uw')}
-    `)
-  }
-  const fresh: RawBuilder<unknown>[] = []
-  if (chosen.includes('own')) fresh.push(sql`select lemma from user_words where user_id = ${ownerId} and mastered = false`)
+  if (word === 'uw' && chosen.includes('own')) parts.push(sql`true`)
+  if (word === 'uw' && chosen.includes('texts')) parts.push(textScope('uw'))
   for (const level of LEVELS) {
-    if (chosen.includes(level)) fresh.push(sql`select lemma from lemmas where level = ${level}`)
+    if (chosen.includes(level)) parts.push(sql`l.level = ${level}`)
   }
   for (const [pack, [low, high]] of Object.entries(BANDS)) {
-    if (chosen.includes(pack)) fresh.push(sql`select lemma from lemmas where rank between ${low} and ${high}`)
+    if (chosen.includes(pack)) parts.push(sql`l.rank between ${low} and ${high}`)
   }
-  if (fresh.length) {
+  return parts
+}
+
+async function freshLemmas(ownerId: string, chosen: string[], limit: number) {
+  const parts: RawBuilder<unknown>[] = []
+  const idle = packScope(chosen, 'uw')
+  if (idle.length) {
     parts.push(sql`
-      select pool.lemma
-      from (${sql.join(fresh, sql` union `)}) pool
-      where not exists (
-        select 1 from user_words uw where uw.user_id = ${ownerId} and uw.lemma = pool.lemma
-      )
+      select uw.lemma, l.rank
+      from user_words uw
+      join lemmas l on l.lemma = uw.lemma
+      where uw.user_id = ${ownerId}
+        and uw.correct = 0 and uw.wrong = 0 and uw.interval_days = 0 and uw.mastered = false
+        and (${sql.join(idle, sql` or `)})
+    `)
+  }
+  const outside = packScope(chosen, 'l')
+  if (outside.length) {
+    parts.push(sql`
+      select l.lemma, l.rank
+      from lemmas l
+      where (${sql.join(outside, sql` or `)})
+        and not exists (
+          select 1 from user_words uw where uw.user_id = ${ownerId} and uw.lemma = l.lemma
+        )
     `)
   }
   if (!parts.length) return []
   const rows = await sql<{ lemma: string }>`
     select pool.lemma
     from (${sql.join(parts, sql` union `)}) pool
-    order by random()
+    order by pool.rank asc nulls last, pool.lemma
     limit ${limit}
   `.execute(database)
   return rows.rows.map((row) => row.lemma).filter(Boolean)
@@ -153,6 +162,7 @@ export default async function studyDeck(packs: string[], mode: string, daily: nu
     from user_words uw
     join lemmas l on l.lemma = uw.lemma
     where uw.user_id = ${id} and uw.mastered = false and (uw.due_at is null or uw.due_at <= now())
+      and not (uw.correct = 0 and uw.wrong = 0 and uw.interval_days = 0)
     ${scope}
     order by uw.due_at asc nulls first, random()
     limit 500
@@ -163,16 +173,16 @@ export default async function studyDeck(packs: string[], mode: string, daily: nu
   const nextMinutes = seconds > 0 ? Math.max(1, Math.ceil(seconds / 60)) : null
   const nextDueAt = seconds > 0 && dueDate ? dueDate.toISOString() : null
   const dueLemmas = due.rows.map((row) => row.lemma).filter(Boolean)
-  const blocked = Boolean(kind) && !extra && dueLemmas.length === 0 && nextMinutes !== null
+  const reviewWaiting = kind === 'review' && dueLemmas.length === 0 && nextMinutes !== null
   let fresh: string[] = []
-  if (extra || ((kind === 'learn' || kind === 'mixed') && chosen.length > 0 && !blocked)) {
+  if (extra || ((kind === 'learn' || kind === 'mixed') && chosen.length > 0)) {
     if (!chosen.length) throw new Error('Выберите хотя бы одну пачку')
     fresh = await freshLemmas(id, chosen, limit)
     if ((extra || kind === 'learn') && fresh.length === 0) throw new Error('В выбранных пачках нет новых слов')
   }
   let lemmas: string[] = []
   if (extra) lemmas = fresh
-  else if (blocked) lemmas = []
+  else if (reviewWaiting) lemmas = []
   else if (kind === 'review') lemmas = dueLemmas
   else if (kind === 'learn') lemmas = fresh
   else if (kind === 'mixed') {

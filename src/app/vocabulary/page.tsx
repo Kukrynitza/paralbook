@@ -88,12 +88,16 @@ export default function Page() {
     setPage(1)
   }
 
+  function studyQuery() {
+    const chosen = packs.length ? packs : user ? [user.cefr] : []
+    const next = new URLSearchParams({ mode: 'mixed', daily: String(daily) })
+    if (chosen.length) next.set('packs', chosen.join(','))
+    return `/study?${next.toString()}`
+  }
+
   function openStudy() {
     writeDailyNew(daily)
-    const chosen = packs.length ? packs : user ? [user.cefr] : []
-    const next = new URLSearchParams({ daily: String(daily) })
-    if (chosen.length) next.set('packs', chosen.join(','))
-    router.push(`/study?${next.toString()}`)
+    router.push(studyQuery())
   }
 
   async function seed() {
@@ -159,7 +163,7 @@ export default function Page() {
           </div>
           <div>
             <div className="row">
-              <span>Новых в день</span>
+              <span>Новых</span>
               <span className="muted">{daily}</span>
             </div>
             <input
@@ -176,7 +180,7 @@ export default function Page() {
             />
           </div>
           <button className="btn" onClick={openStudy}>
-            Выбрать режим
+            Начать
           </button>
         </div>
       ) : null}
@@ -234,7 +238,7 @@ export default function Page() {
         </ul>
       )}
       {pageItems.length > 0 ? (
-        <Link className={styles.fab} href="/study" aria-label="Режимы повторения" title="Режимы повторения">
+        <Link className={styles.fab} href={studyQuery()} aria-label="Изучение" title="Изучение">
           <Play size={24} fill="currentColor" />
         </Link>
       ) : null}

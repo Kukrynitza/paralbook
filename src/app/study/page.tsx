@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 import practiceWord from '@/actions/Training/practiceWord'
@@ -9,17 +9,14 @@ import selectStudyCard from '@/actions/Training/selectStudyCard'
 import studyDeck, { type StudyDeck } from '@/actions/Training/studyDeck'
 import WordCard from '@/components/WordCard/WordCard'
 import { useAuth, useUi } from '@/contexts/AuthContext'
-import { readDailyNew, writeDailyNew } from '@/sorse/prefs'
-import { LEVELS, type SessionCard } from '@/sorse/types'
+import { readDailyNew } from '@/sorse/prefs'
+import { type SessionCard } from '@/sorse/types'
 import styles from './page.module.css'
 
-const PACKS = [
-  ['own', 'Свои слова'],
-  ['texts', 'Из текстов'],
-  ['r100', '1–100'],
-  ['r1000', '101–1000'],
-  ['r3000', '1001–3000'],
-  ...LEVELS.map((level) => [level, level] as const),
+const MODES = [
+  ['learn', 'Новые'],
+  ['mixed', 'Смешанное'],
+  ['review', 'Повторение'],
 ] as const
 
 const NO_WORDS: string[] = []
@@ -37,7 +34,7 @@ function Study() {
   const search = useSearchParams()
   const { user } = useAuth()
   const { notify } = useUi()
-  const mode = search.get('mode') || ''
+  const mode = search.get('mode') || 'mixed'
   const extra = search.get('extra') === '1'
   const [packs, setPacks] = useState<string[]>(() => (search.get('packs') || '').split(',').filter(Boolean))
   const [daily, setDaily] = useState(10)
@@ -75,7 +72,8 @@ function Study() {
     setReplay(null)
     setError('')
     const dailyCount = Number(search.get('daily')) || readDailyNew()
-    if (mode && !extra) {
+    setCard(null)
+    if (mode === 'review' && !extra) {
       const stored = window.localStorage.getItem('paralbook.studyLock')
       if (stored && new Date(stored).getTime() > Date.now()) {
         setLockUntil(stored)
@@ -100,15 +98,13 @@ function Study() {
       window.localStorage.removeItem('paralbook.studyLock')
     }
     setLockUntil(null)
-    if (mode) {
-      setDeck(null)
-      setReplay(null)
-    }
+    setDeck(null)
+    setReplay(null)
     studyDeck(packs, extra ? 'learn' : mode, dailyCount, extra)
       .then((next) => {
         if (!active) return
         setDeck(next)
-        if (!extra && mode && next.lemmas.length === 0 && next.nextDueAt && new Date(next.nextDueAt).getTime() > Date.now()) {
+        if (mode === 'review' && !extra && next.lemmas.length === 0 && next.nextDueAt && new Date(next.nextDueAt).getTime() > Date.now()) {
           window.localStorage.setItem('paralbook.studyLock', next.nextDueAt)
           setLockUntil(next.nextDueAt)
         }
@@ -165,9 +161,13 @@ function Study() {
     }
   }, [words, index, mode])
 
-  function openMode(next: string) {
-    writeDailyNew(daily)
-    const query = new URLSearchParams({ mode: next, packs: packs.join(','), daily: String(daily) })
+  function switchMode(next: string) {
+    if (next === mode) return
+    const query = new URLSearchParams({
+      mode: next,
+      packs: packs.join(','),
+      daily: search.get('daily') || String(daily),
+    })
     router.push(`/study?${query.toString()}`)
   }
 
@@ -255,7 +255,7 @@ function Study() {
     studyDeck(packs, mode, dailyCount)
       .then((next) => {
         setDeck(next)
-        if (next.lemmas.length === 0 && next.nextDueAt && new Date(next.nextDueAt).getTime() > Date.now()) {
+        if (mode === 'review' && next.lemmas.length === 0 && next.nextDueAt && new Date(next.nextDueAt).getTime() > Date.now()) {
           window.localStorage.setItem('paralbook.studyLock', next.nextDueAt)
           setLockUntil(next.nextDueAt)
         }
@@ -265,138 +265,76 @@ function Study() {
       })
   }
 
-  function addMore(count: number) {
-    const next = Math.min(60, Math.max(5, count || 5))
-    writeDailyNew(next)
-    const query = new URLSearchParams({
-      mode: 'learn',
-      packs: packs.join(','),
-      daily: String(next),
-      extra: '1',
-    })
-    router.push(`/study?${query.toString()}`)
-  }
+  const finished = deck && index >= words.length && words.length > 0
+  const sessionUntil = finished && !missed.current && lockAt.current && lockAt.current > Date.now() ? new Date(lockAt.current).toISOString() : null
+  const reviewLock = mode === 'review' ? sessionUntil || (lockUntil && new Date(lockUntil).getTime() > Date.now() ? lockUntil : null) : null
 
-  if (!mode) {
+  function screen(body: ReactNode, counter?: string) {
     return (
       <div>
         <header className="header">
           <button className="back" onClick={() => router.push('/vocabulary')} aria-label="Назад">
             <ArrowLeft size={22} />
           </button>
-          <div className="grow">Режим</div>
-          <span style={{ width: 24 }} />
+          <div className="grow">Изучение</div>
+          {counter ? <span>{counter}</span> : <span style={{ width: 24 }} />}
         </header>
-        <div className="pad stack">
-          <div className="gap8">
-            {PACKS.map(([id, label]) => (
-              <button
-                key={id}
-                className={packs.includes(id) ? 'chip on' : 'chip'}
-                onClick={() => setPacks((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div>
-            <div className="row">
-              <span>Новых в день</span>
-              <span className="muted">{daily}</span>
-            </div>
-            <input
-              type="range"
-              min={5}
-              max={60}
-              value={daily}
-              onChange={(event) => {
-                const value = Number(event.target.value)
-                setDaily(value)
-                writeDailyNew(value)
-              }}
-            />
-          </div>
-          <button className="btn" onClick={() => openMode('learn')}>
-            Учить новые
-          </button>
-          <button className="btn ghost" onClick={() => openMode('review')}>
-            Повторять
-          </button>
-          <button className="btn ghost" onClick={() => openMode('mixed')}>
-            Смешанный
-          </button>
-          {error ? <p className="form-error">{error}</p> : deck ? <Today deck={deck} /> : <p className="loading">Загрузка…</p>}
+        <div className={styles.modes}>
+          {MODES.map(([id, label]) => (
+            <button key={id} className={mode === id ? 'chip on' : 'chip'} onClick={() => switchMode(id)}>
+              {label}
+            </button>
+          ))}
         </div>
+        {body}
       </div>
     )
   }
 
   if (error) {
-    return (
+    return screen(
       <div className="empty">
         <h2>Изучение не началось</h2>
         <p>{error}</p>
-        <button className="btn" onClick={() => router.push('/study')}>
-          К режимам
-        </button>
-      </div>
+      </div>,
     )
   }
 
-  const finished = deck && index >= words.length && words.length > 0
-  const sessionUntil = finished && !missed.current && lockAt.current && lockAt.current > Date.now() ? new Date(lockAt.current).toISOString() : null
-  const activeLock = sessionUntil || (lockUntil && new Date(lockUntil).getTime() > Date.now() ? lockUntil : null)
-  if (mode && activeLock) {
-    return (
+  if (reviewLock) {
+    return screen(
       <Wait
-        until={activeLock}
+        until={reviewLock}
         newToday={deck?.newToday ?? 0}
-        onLater={() => router.push('/study')}
-        onMore={addMore}
+        onLater={() => router.push('/vocabulary')}
         onExpire={expireLock}
-      />
+      />,
     )
   }
 
   if (deck && deck.lemmas.length === 0) {
-    return (
+    return screen(
       <div className="empty">
         <h2>Слов нет</h2>
         <p>В выбранных пачках нет новых слов, и сейчас нечего повторять.</p>
-        <button className="btn" onClick={() => router.push('/study')}>
-          К режимам
-        </button>
-      </div>
+      </div>,
     )
   }
 
   if (finished) {
-    return (
+    return screen(
       <div className="empty">
         <h2>Пока всё</h2>
         <p>{missed.current ? 'Слова, на которые нажали «Не знаю», можно повторить сразу.' : 'Карточки этой пачки пройдены.'}</p>
-        <button className="btn" onClick={() => router.push('/study')}>
-          К режимам
-        </button>
-      </div>
+      </div>,
     )
   }
 
-  if (!card || !deck) return <p className="loading">Загрузка…</p>
+  if (!card || !deck) return screen(<p className="loading">Загрузка…</p>)
 
   const reviewLabel = mode === 'review' || (mode === 'mixed' && card.review > 0) ? `Повтор ${Math.min(6, card.review + 1)}` : null
 
-  return (
-    <div>
-      <header className="header">
-        <button className="back" onClick={() => router.push('/study')} aria-label="Назад">
-          <ArrowLeft size={22} />
-        </button>
-        <div className="grow">{mode === 'learn' ? 'Новые' : mode === 'mixed' ? 'Смешанный' : 'Повтор'}</div>
-        <span>
-          {index + 1}/{words.length}
-        </span>
-      </header>
+  return screen(
+    <>
       <div className={styles.deck}>
         <div key={index} className={leave ? `${styles.flipper} ${leave === 'no' ? styles.leaveNo : styles.leaveYes}` : `${styles.flipper} ${styles.enter}`}>
           <WordCard
@@ -424,7 +362,8 @@ function Study() {
           <ArrowRight size={16} />
         </button>
       </div>
-    </div>
+    </>,
+    `${index + 1}/${words.length}`,
   )
 }
 
@@ -452,51 +391,24 @@ function Wait({
   until,
   newToday,
   onLater,
-  onMore,
   onExpire,
 }: {
   until: string
   newToday: number
   onLater: () => void
-  onMore: (count: number) => void
   onExpire: () => void
 }) {
   const left = useMinuteCountdown(until)
-  const [count, setCount] = useState(10)
   const expire = useRef(onExpire)
   expire.current = onExpire
-  useEffect(() => {
-    setCount(readDailyNew())
-  }, [])
   useEffect(() => {
     if (left === 0) expire.current()
   }, [left])
   return (
     <div className="pad stack">
-      <header className="header">
-        <button className="back" onClick={onLater} aria-label="Назад">
-          <ArrowLeft size={22} />
-        </button>
-        <div className="grow">Повтор</div>
-        <span style={{ width: 24 }} />
-      </header>
       <h2 style={{ margin: 0, textAlign: 'center' }}>Рано повторять</h2>
       <p style={{ textAlign: 'center' }}>Следующие слова откроются через {left} мин.</p>
       <p className="muted" style={{ textAlign: 'center' }}>Сегодня новых слов: {newToday}.</p>
-      <label className="stack">
-        <span>Сколько новых слов</span>
-        <input
-          className="input"
-          type="number"
-          min={5}
-          max={60}
-          value={count}
-          onChange={(event) => setCount(Number(event.target.value))}
-        />
-      </label>
-      <button className="btn" onClick={() => onMore(count)}>
-        Ещё новых слов
-      </button>
       <button className="btn ghost" onClick={onLater}>
         Вернуться позже
       </button>
@@ -504,28 +416,3 @@ function Wait({
   )
 }
 
-function Today({ deck }: { deck: StudyDeck }) {
-  return (
-    <div className="stack">
-      <strong>Серия {deck.streak} дн.</strong>
-      <div className={styles.metrics} style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-        <div className={styles.metric}>
-          <b>{deck.today.new}</b>
-          <span className="muted">новые</span>
-        </div>
-        <div className={styles.metric}>
-          <b>{deck.today.reviewed}</b>
-          <span className="muted">повторённые</span>
-        </div>
-        <div className={styles.metric}>
-          <b>{deck.today.mastered}</b>
-          <span className="muted">выученные</span>
-        </div>
-        <div className={styles.metric} style={{ gridColumn: 2 }}>
-          <b>{deck.today.known}</b>
-          <span className="muted">уже известные</span>
-        </div>
-      </div>
-    </div>
-  )
-}
