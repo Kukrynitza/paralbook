@@ -34,12 +34,125 @@
 }
 
 .face {
+  position: relative;
   background: var(--surface);
   border-radius: 16px;
-  padding: 28px 20px;
+  padding: 36px 24px 32px;
   text-align: center;
-  min-height: 280px;
+  min-height: 460px;
   transition: background 480ms ease;
+}
+
+.badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.review {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.pos {
+  margin: 4px 0 0;
+  font-size: 18px;
+}
+
+.note {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.sound {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 18px;
+}
+
+.speak {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.back {
+  transform: rotateY(180deg);
+  display: flex;
+  flex-direction: column;
+}
+
+.sheet {
+  overflow: visible;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.gloss {
+  margin: 4px 0 0;
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.sample,
+.pair {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  text-align: center;
+  font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.pair {
+  font-size: 18px;
+  line-height: 26px;
+}
+
+.sample p,
+.pair p {
+  margin: 0;
+}
+
+.spoken {
+  display: block;
+  text-align: center;
+}
+
+.spoken .speak {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+.ru {
+  margin-top: 4px;
+  color: var(--muted);
+  text-align: center;
 }
 
 .peek {
@@ -71,8 +184,8 @@
 .leaveYes .face { background: color-mix(in srgb, var(--ok) 24%, var(--surface)); }
 
 .flip {
-  position: relative;
-  min-height: 280px;
+  display: grid;
+  min-height: 460px;
   transform-style: preserve-3d;
   transition: transform 520ms ease;
 }
@@ -80,15 +193,12 @@
 .flipped { transform: rotateY(180deg); }
 
 .side {
+  grid-area: 1 / 1;
   margin: 0;
+  height: auto;
   backface-visibility: hidden;
 }
 
-.back {
-  position: absolute;
-  inset: 0;
-  transform: rotateY(180deg);
-}
 
 .flipped .side:not(.back) { pointer-events: none; }
 .flip:not(.flipped) .back { pointer-events: none; }
@@ -113,11 +223,11 @@
 }
 
 @keyframes card-toss-no {
-  to { opacity: 0; transform: translate(-88px, 168px) rotate(-18deg); }
+  to { opacity: 0; transform: translate(88px, 168px) rotate(18deg); }
 }
 
 @keyframes card-toss-yes {
-  to { opacity: 0; transform: translate(88px, 168px) rotate(18deg); }
+  to { opacity: 0; transform: translate(-88px, 168px) rotate(-18deg); }
 }
 
 @keyframes reveal {

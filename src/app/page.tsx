@@ -13,6 +13,7 @@ import { useUi } from '@/contexts/AuthContext'
 import Pager from '@/components/Pager/Pager'
 import Ring from '@/components/Ring/Ring'
 import dayWord from '@/sorse/dayWord'
+import { preview } from '@/sorse/preview'
 import friendStyles from '@/components/FriendCard/FriendCard.module.css'
 import styles from './page.module.css'
 
@@ -51,12 +52,16 @@ export default function Page() {
   }, [page, sort])
 
   async function remove(item: CollectionItem) {
-    const ok = await confirm(item.source === 'chat' && !item.published ? 'Удалить текст?' : 'Убрать текст из подборки?')
+    const ok = await confirm(item.source !== 'library' && !item.published ? 'Удалить текст?' : 'Убрать текст из подборки?')
     if (!ok) return
-    if (item.source === 'chat' && !item.published) await deleteText(item.textId)
-    else await removeFromCollection(item.id)
-    setList(await selectCollection(sort, page))
-    notify('Сохранено')
+    try {
+      if (item.source !== 'library' && !item.published) await deleteText(item.textId)
+      else await removeFromCollection(item.id)
+      setList(await selectCollection(sort, page))
+      notify('Сохранено')
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось удалить')
+    }
   }
 
   async function publish(item: CollectionItem) {
@@ -96,7 +101,7 @@ export default function Page() {
                 <span>Слова</span>
                 <span>шт</span>
               </div>
-              <Ring value={today.words} max={10} center={String(today.words)} />
+              <div className={styles.count}>{today.words}</div>
               <div className={styles.cap}>{today.words} слов</div>
             </div>
             <div className={styles.ringCard}>
@@ -160,7 +165,7 @@ export default function Page() {
       {list && list.total === 0 ? (
         <div className="empty">
           <h2>В подборке пока пусто</h2>
-          <p>Сгенерируйте текст в чате или добавьте его из библиотеки.</p>
+          <p>Сгенерируйте текст в чате, загрузите свой или добавьте его из библиотеки.</p>
           <Link className="btn" href="/chat">
             Перейти в чат
           </Link>
@@ -170,7 +175,9 @@ export default function Page() {
           {list?.items.map((item) => (
             <article className="card" key={item.id}>
               <div className="row">
-                <span className="badge">{item.source === 'chat' && !item.published ? 'Создано в чате' : 'Библиотека'}</span>
+                <span className="badge">
+                  {item.source === 'chat' && !item.published ? 'Создано в чате' : item.source === 'upload' ? 'Загружено' : 'Библиотека'}
+                </span>
                 <span className="small muted">
                   {item.minutes} мин · {item.level}
                 </span>
@@ -178,13 +185,13 @@ export default function Page() {
               <h3>
                 <Link href={`/read/${item.textId}`}>{item.title}</Link>
               </h3>
-              <p>{item.excerpt}</p>
+              <p>{preview(item.excerpt)}</p>
               <div className="meta">
                 <span>★ {item.rating.toFixed(1)}</span>
                 <span>{item.minutes} мин</span>
                 <span>{item.topic}</span>
               </div>
-              {item.source === 'chat' && !item.published ? (
+              {item.source !== 'library' && !item.published ? (
                 <div className="actions">
                   <button className="btn ghost wrap" onClick={() => publish(item)}>
                     Опубликовать в библиотеку

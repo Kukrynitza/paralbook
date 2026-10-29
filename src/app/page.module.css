@@ -33,6 +33,14 @@
   color: var(--muted);
 }
 
+.count {
+  height: 72px;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  font-weight: 700;
+}
+
 .cap {
   margin-top: 8px;
   font-size: 12px;

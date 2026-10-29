@@ -2,7 +2,8 @@
 
 import database from '@/modules/database'
 import userId from '@/sorse/userId'
-import { addActivity, cardOf, todayActivity } from '@/sorse/query'
+import solver from '@/sorse/solver'
+import { cardOf, todayActivity } from '@/sorse/query'
 import type { Session } from '@/sorse/types'
 
 const COMPLIMENT = 'Так держать — слова возвращаются вовремя.'
@@ -62,20 +63,15 @@ export default async function startSession(newWords: number, total: number): Pro
   if (newWords < 0 || newWords > 30 || total < 5 || total > 50 || newWords > total) {
     throw new Error('Новых от 0 до 30, всего от 5 до 50, новых не больше всего')
   }
-  const owned = await database.selectFrom('userWords').select(['lemma', 'wrong', 'mastered']).where('userId', '=', id).execute()
-  const ownedLemmas = new Set(owned.map((item) => item.lemma))
-  const fresh = await database.selectFrom('lemmas').select('lemma').orderBy('rank', 'asc').execute()
-  const freshCards = fresh.filter((item) => !ownedLemmas.has(item.lemma)).slice(0, newWords).map((item) => item.lemma)
-  const review = owned
-    .filter((item) => !item.mastered)
-    .sort((a, b) => b.wrong - a.wrong)
-    .map((item) => item.lemma)
-  const pool = [...freshCards, ...review]
-  if (!pool.length) {
-    throw new Error('В словаре пока нет слов')
+  const queue = await solver<{ lemmas: string[] }>(`/due?userId=${encodeURIComponent(id)}&newWords=${newWords}&total=${total}`)
+  const cards = queue.lemmas
+  if (cards.length) {
+    try {
+      await solver('/examples', { lemmas: cards })
+    } catch {
+      // колода открывается и со старыми примерами
+    }
   }
-  const cards = pool.slice(0, total)
-  while (cards.length < total) cards.push(pool[cards.length % pool.length])
   const created = await database.transaction().execute(async (trx) => {
     const session = await trx
       .insertInto('trainingSessions')

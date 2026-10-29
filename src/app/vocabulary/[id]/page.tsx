@@ -87,7 +87,7 @@ export default function Page() {
 
   if (!item || !entry) {
     if (message) return <p className="form-error pad">{message}</p>
-    return <p className="pad muted">Загрузка…</p>
+    return <p className="loading">Загрузка…</p>
   }
 
   return (
@@ -116,8 +116,10 @@ export default function Page() {
           </label>
         }
       />
-      <div className="pad stack">
-        <div className={item.tone === 'ok' ? `${styles.stats} ${styles.statsOk}` : `${styles.stats} ${styles.statsError}`}>
+        <div className="pad stack">
+          {item.contextEn ? <p>{item.contextEn}</p> : null}
+          {item.memory ? <p className="small muted">Опора: {item.memory}</p> : null}
+          <div className={item.tone === 'ok' ? `${styles.stats} ${styles.statsOk}` : `${styles.stats} ${styles.statsError}`}>
           Верно: {item.correct} · Ошибки: {item.wrong}
         </div>
         {phase === 'error' ? <p className="form-error">{message}</p> : null}
@@ -129,7 +131,7 @@ export default function Page() {
           Запомнил
         </button>
         <p className="small muted" style={{ textAlign: 'center' }}>
-          После этого слово реже попадает в тренировку
+          После этого слово уходит из повтора
         </p>
         <button className="btn ghost" onClick={remove}>
           Убрать из словаря

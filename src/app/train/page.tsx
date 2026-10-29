@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ArrowRight, Check, Eye, Flame } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, Flame } from 'lucide-react'
 import reviewCard from '@/actions/Training/reviewCard'
 import startSession from '@/actions/Training/startSession'
+import WordCard from '@/components/WordCard/WordCard'
 import { type Session } from '@/sorse/types'
 import { readTraining } from '@/sorse/prefs'
 import styles from './page.module.css'
@@ -14,6 +15,7 @@ export default function Page() {
   const [session, setSession] = useState<Session | null>(null)
   const [hint, setHint] = useState(false)
   const [translation, setTranslation] = useState(false)
+  const [hintSeen, setHintSeen] = useState(false)
   const [summary, setSummary] = useState(false)
   const [error, setError] = useState('')
   const [leave, setLeave] = useState<'no' | 'yes' | null>(null)
@@ -45,6 +47,7 @@ export default function Page() {
     setSession(next)
     setHint(false)
     setTranslation(false)
+    setHintSeen(false)
     setLeave(null)
   }
 
@@ -138,48 +141,28 @@ export default function Page() {
             </div>
           ) : null}
           <div key={session.index} className={leave ? `${styles.flipper} ${leave === 'no' ? styles.leaveNo : styles.leaveYes}` : `${styles.flipper} ${styles.enter}`}>
-            <div className={hint || translation ? `${styles.flip} ${styles.flipped}` : styles.flip}>
-              <div className={`${styles.face} ${styles.side}`}>
-                <h2>{session.card.lemma}</h2>
-                <p className="muted">{session.card.ipa}</p>
-                <hr className="line" />
-                {session.card.example ? <p>{session.card.example}</p> : null}
-                <button className="btn ghost" onClick={() => setHint(true)}>
-                  <Eye size={16} />
-                  Показать подсказку
-                </button>
-                <button className="btn ghost" style={{ marginTop: 8 }} onClick={() => setTranslation(true)}>
-                  <Eye size={16} />
-                  Показать перевод
-                </button>
-              </div>
-              <div className={`${styles.face} ${styles.side} ${styles.back}`}>
-                <h2>{session.card.lemma}</h2>
-                <p className="muted">{session.card.ipa}</p>
-                <hr className="line" />
-                {hint ? <p className={styles.reveal}>{session.card.hint}</p> : (
-                  <button className="btn ghost" onClick={() => setHint(true)}>
-                    <Eye size={16} />
-                    Показать подсказку
-                  </button>
-                )}
-                {translation ? <p className={styles.reveal}>{session.card.translation}</p> : (
-                  <button className="btn ghost" style={{ marginTop: 8 }} onClick={() => setTranslation(true)}>
-                    <Eye size={16} />
-                    Показать перевод
-                  </button>
-                )}
-              </div>
-            </div>
+            <WordCard
+              card={session.card}
+              flipped={hint}
+              showTranslation={translation}
+              hintSeen={hintSeen}
+              reviewLabel={`Повтор ${Math.min(6, session.card.review + 1)}`}
+              onHint={() => setHint(true)}
+              onTranslation={() => setTranslation(true)}
+              onBack={() => {
+                setHint(false)
+                setHintSeen(true)
+              }}
+            />
           </div>
         </div>
         <div className="actions pad">
-          <button className="btn no" disabled={leave !== null} onClick={() => answer(false)}>
-            <ArrowLeft size={16} />
-            Не помню
-          </button>
           <button className="btn yes" disabled={leave !== null} onClick={() => answer(true)}>
-            Помню
+            <ArrowLeft size={16} />
+            Знаю
+          </button>
+          <button className="btn no" disabled={leave !== null} onClick={() => answer(false)}>
+            Не знаю
             <ArrowRight size={16} />
           </button>
         </div>
@@ -199,5 +182,5 @@ export default function Page() {
     )
   }
 
-  return <p className="pad muted">Загрузка…</p>
+  return <p className="loading">Загрузка…</p>
 }

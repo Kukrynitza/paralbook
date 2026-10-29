@@ -12,9 +12,13 @@ import friendStyles from '@/components/FriendCard/FriendCard.module.css'
 export default function Page() {
   const router = useRouter()
   const [items, setItems] = useState<Friend[]>([])
+  const [code, setCode] = useState('')
 
   useEffect(() => {
-    selectFriends().then((data) => setItems(data.items))
+    selectFriends().then((data) => {
+      setItems(data.items)
+      setCode(data.code)
+    })
   }, [])
 
   return (
@@ -26,6 +30,8 @@ export default function Page() {
         <h1>Друзья</h1>
       </header>
       <div className="pad">
+        <p className="small muted" style={{ marginTop: 0 }}>Ваш код</p>
+        <p style={{ margin: '4px 0 16px', fontSize: 22, fontWeight: 700, letterSpacing: '0.04em' }}>{code || '…'}</p>
         <div className="row">
           <h2 style={{ margin: 0 }}>Друзья сегодня</h2>
           <Link href="/friends/add" className="link" style={{ width: 'auto' }}>

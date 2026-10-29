@@ -10,15 +10,27 @@ export default async function saveProgress(textId: string, page: number): Promis
     throw new Error('Нужно войти')
   }
   return database.transaction().execute(async (trx) => {
-    const text = await trx.selectFrom('texts').select(['id', 'minutes']).where('id', '=', textId).executeTakeFirst()
-    const entry = await trx
+    const text = await trx
+      .selectFrom('texts')
+      .select(['id', 'minutes', 'ownerId', 'published'])
+      .where('id', '=', textId)
+      .executeTakeFirst()
+    if (!text || (!text.published && text.ownerId !== id)) {
+      throw new Error('Текст не найден')
+    }
+    let entry = await trx
       .selectFrom('collectionItems')
-      .select(['id', 'credited'])
+      .select(['id', 'credited', 'progress'])
       .where('userId', '=', id)
       .where('textId', '=', textId)
       .executeTakeFirst()
-    if (!text || !entry) {
-      throw new Error('Сначала добавьте текст в подборку')
+    if (!entry) {
+      const source = text.published && text.ownerId !== id ? 'library' : 'upload'
+      entry = await trx
+        .insertInto('collectionItems')
+        .values({ userId: id, textId, source, progress: 0, credited: false })
+        .returning(['id', 'credited', 'progress'])
+        .executeTakeFirstOrThrow()
     }
     const pageCount = await trx
       .selectFrom('pages')
@@ -31,15 +43,17 @@ export default async function saveProgress(textId: string, page: number): Promis
     }
     const last = total - 1
     const next = Math.max(0, Math.min(last, page))
-    let progress = next / total
+    const previous = Number(entry.progress) || 0
+    let progress = Math.max(previous, next / total)
     let finished = false
     if (page >= total) {
       progress = 1
       finished = true
-      if (!entry.credited) {
-        await addActivity(trx, id, text.minutes, 0)
-        await trx.updateTable('collectionItems').set({ credited: true }).where('id', '=', entry.id).execute()
-      }
+    }
+    const gained = Math.floor(progress * text.minutes) - Math.floor(previous * text.minutes)
+    if (gained > 0) await addActivity(trx, id, gained, 0)
+    if (finished && !entry.credited) {
+      await trx.updateTable('collectionItems').set({ credited: true }).where('id', '=', entry.id).execute()
     }
     await trx.updateTable('collectionItems').set({ progress }).where('id', '=', entry.id).execute()
     return { page: Math.min(next, last), progress, finished }

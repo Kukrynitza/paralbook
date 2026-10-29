@@ -89,7 +89,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!snack) return
-    const timer = window.setTimeout(() => setSnack(null), 2200)
+    const timer = window.setTimeout(() => setSnack(null), 4200)
     return () => window.clearTimeout(timer)
   }, [snack])
 

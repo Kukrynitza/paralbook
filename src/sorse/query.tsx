@@ -1,6 +1,6 @@
 import { sql, type Kysely, type Transaction } from 'kysely'
 import type { Database } from '@/modules/database'
-import { shortHint } from '@/sorse/hint'
+import solver from '@/sorse/solver'
 import type { Friend, LibraryItem, SessionCard, VocabItem } from '@/sorse/types'
 
 export const PAGE_SIZE = 4
@@ -40,6 +40,39 @@ export function recentDays() {
   })
 }
 
+export function streakCount(days: string[], today: string) {
+  const unique = [...new Set(days)].sort().reverse()
+  if (!unique.length || !today) return 0
+  const start = unique[0]
+  const yesterday = shiftDay(today, -1)
+  if (start !== today && start !== yesterday) return 0
+  const seen = new Set(unique)
+  let cursor = start
+  let count = 0
+  while (seen.has(cursor)) {
+    count += 1
+    cursor = shiftDay(cursor, -1)
+  }
+  return count
+}
+
+function shiftDay(iso: string, delta: number) {
+  const [year, month, day] = iso.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  date.setUTCDate(date.getUTCDate() + delta)
+  return date.toISOString().slice(0, 10)
+}
+
+export async function touchStreak(db: Db, userId: string) {
+  const todayRow = await sql<{ day: string }>`select current_date::text as day`.execute(db)
+  const today = String(todayRow.rows[0]?.day ?? '').slice(0, 10)
+  const rows = await db.selectFrom('activityDays').select(['day', 'minutes', 'words']).where('userId', '=', userId).execute()
+  const days = rows.filter((row) => Number(row.minutes) > 0 || Number(row.words) > 0).map((row) => dayKey(row.day))
+  const streak = streakCount(days, today)
+  await db.updateTable('profiles').set({ streak }).where('id', '=', userId).execute()
+  return streak
+}
+
 export async function addActivity(db: Db, userId: string, minutes: number, words: number) {
   if (!minutes && !words) return
   await db
@@ -57,6 +90,7 @@ export async function addActivity(db: Db, userId: string, minutes: number, words
       }),
     )
     .execute()
+  await touchStreak(db, userId)
 }
 
 export async function todayActivity(db: Db, userId: string) {
@@ -138,27 +172,28 @@ export async function libraryCard(db: Db, userId: string, textId: string): Promi
   }
 }
 
-export async function ensureWord(db: Db, userId: string, lemma: string, countToday: boolean) {
-  const known = await db
-    .selectFrom('lemmas')
-    .select(['lemma', 'hint'])
-    .where('lemma', '=', lemma.toLowerCase())
-    .executeTakeFirst()
-  if (!known) throw new Error('Слова нет в словарной статье')
-  const existing = await db
-    .selectFrom('userWords')
-    .select('id')
-    .where('userId', '=', userId)
-    .where('lemma', '=', known.lemma)
-    .executeTakeFirst()
-  if (existing) return existing.id
-  const created = await db
-    .insertInto('userWords')
-    .values({ userId, lemma: known.lemma, hint: shortHint(known.hint ?? ''), correct: 0, wrong: 0, mastered: false })
-    .returning('id')
-    .executeTakeFirstOrThrow()
-  if (countToday) await addActivity(db, userId, 0, 1)
-  return created.id
+export async function ensureWord(
+  _db: Db,
+  userId: string,
+  lemma: string,
+  countToday: boolean,
+  extra?: {
+    contextEn?: string | null
+    contextRu?: string | null
+    senseId?: string | null
+    disagreement?: boolean
+  },
+) {
+  const saved = await solver<{ id: string }>('/vocabulary', {
+    userId,
+    lemma,
+    countToday,
+    senseId: extra?.senseId ?? null,
+    contextEn: extra?.contextEn ?? null,
+    contextRu: extra?.contextRu ?? null,
+    disagreement: extra?.disagreement ?? null,
+  })
+  return saved.id
 }
 
 export async function vocabById(db: Db, userId: string, itemId: string): Promise<VocabItem> {
@@ -172,6 +207,7 @@ export async function vocabById(db: Db, userId: string, itemId: string): Promise
       'userWords.correct',
       'userWords.wrong',
       'userWords.mastered',
+      'userWords.contextEn',
       'lemmas.ipa',
       'lemmas.translation',
       'lemmas.example',
@@ -180,12 +216,15 @@ export async function vocabById(db: Db, userId: string, itemId: string): Promise
     .where('userWords.userId', '=', userId)
     .executeTakeFirst()
   if (!row) throw new Error('Слова нет в словаре')
+  const memory = (await solver<{ memory: string | null }>(`/memory?lemma=${encodeURIComponent(row.lemma)}`)).memory
   return {
     id: row.id,
     lemma: row.lemma,
     ipa: row.ipa,
     translation: row.translation,
-    example: row.example,
+    example: row.contextEn || row.example,
+    contextEn: row.contextEn,
+    memory,
     hint: row.hint,
     correct: row.correct,
     wrong: row.wrong,
@@ -197,21 +236,82 @@ export async function vocabById(db: Db, userId: string, itemId: string): Promise
 export async function cardOf(db: Db, userId: string, lemma: string): Promise<SessionCard | null> {
   const known = await db
     .selectFrom('lemmas')
-    .select(['lemma', 'ipa', 'translation', 'example', 'hint'])
+    .select(['lemma', 'ipa', 'translation', 'example', 'hint', 'level', 'rank'])
     .where('lemma', '=', lemma)
     .executeTakeFirst()
   if (!known) return null
   const word = await db
     .selectFrom('userWords')
-    .select('hint')
+    .select(['hint', 'contextEn', 'senseId', 'correct'])
     .where('userId', '=', userId)
     .where('lemma', '=', lemma)
     .executeTakeFirst()
+  const sense = word?.senseId
+    ? await db.selectFrom('senses').select(['text', 'pos']).where('id', '=', word.senseId).executeTakeFirst()
+    : await db.selectFrom('senses').select(['text', 'pos']).where('lemma', '=', known.lemma).orderBy('position', 'asc').executeTakeFirst()
+  const rawTranslation = word?.senseId ? sense?.text || known.translation : known.translation
+  const baseName = formBase(rawTranslation)
+  const base =
+    baseName && baseName !== known.lemma
+      ? await db.selectFrom('lemmas').select('translation').where('lemma', '=', baseName).executeTakeFirst()
+      : undefined
+  const baseTranslation = base?.translation && !formBase(base.translation) ? base.translation : null
+  const note = baseName && baseName !== known.lemma ? formCaption(rawTranslation || '', baseName) : null
+  const rows = await db
+    .selectFrom('senseExamples')
+    .innerJoin('senses', 'senses.id', 'senseExamples.senseId')
+    .select(['senses.id as senseId', 'senseExamples.textEn', 'senseExamples.textRu'])
+    .where('senses.lemma', '=', known.lemma)
+    .orderBy('senses.position', 'asc')
+    .orderBy('senseExamples.position', 'asc')
+    .execute()
+  const ordered = word?.senseId
+    ? [...rows.filter((row) => row.senseId === word.senseId), ...rows.filter((row) => row.senseId !== word.senseId)]
+    : rows
+  const seen = new Map<string, number>()
+  const examples: { textEn: string; textRu: string | null }[] = []
+  for (const row of ordered) {
+    const count = seen.get(row.senseId) ?? 0
+    if (count >= 2 || examples.length >= 6) continue
+    seen.set(row.senseId, count + 1)
+    examples.push({ textEn: row.textEn, textRu: row.textRu })
+  }
+  if (!examples.length && known.example) examples.push({ textEn: known.example, textRu: null })
   return {
     lemma: known.lemma,
+    display: note || sense?.pos !== 'гл.' ? known.lemma : `to ${known.lemma}`,
     ipa: known.ipa,
-    translation: known.translation,
-    example: known.example,
+    translation: note ? baseTranslation : rawTranslation,
+    example: word?.contextEn || known.example,
     hint: word?.hint || known.hint,
+    note,
+    pos: sense?.pos ?? null,
+    level: known.level,
+    band: bandOf(known.rank),
+    review: word?.correct ?? 0,
+    examples,
   }
+}
+
+function formBase(text: string | null | undefined) {
+  const value = text?.trim() || ''
+  if (!/^форма\s/i.test(value)) return null
+  const found = value.match(/([A-Za-z][A-Za-z'-]*)$/)
+  return found ? found[1].toLowerCase() : null
+}
+
+function formCaption(text: string, base: string) {
+  const value = text.toLowerCase()
+  if (value.includes('прошедш')) return `прошедшее время от ${base}`
+  if (value.includes('множествен')) return `множественное число от ${base}`
+  if (value.includes('причасти')) return `причастие от ${base}`
+  if (value.includes('косвен')) return `косвенная форма от ${base}`
+  return `форма от ${base}`
+}
+
+function bandOf(rank: number | null | undefined) {
+  if (!rank || rank < 1 || rank > 3000) return null
+  if (rank <= 100) return '1–100'
+  if (rank <= 1000) return '101–1000'
+  return '1001–3000'
 }

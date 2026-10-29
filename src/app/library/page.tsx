@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Plus, Search, ThumbsDown, ThumbsUp, X } from 'lucide-react'
+import { Plus, Search, ThumbsDown, ThumbsUp, Upload, X } from 'lucide-react'
 import saveLibrary from '@/actions/Library/saveLibrary'
 import selectLibrary from '@/actions/Library/selectLibrary'
 import voteLibrary from '@/actions/Library/voteLibrary'
 import { type LibraryItem, type PageResult } from '@/sorse/types'
 import { useUi } from '@/contexts/AuthContext'
+import { preview } from '@/sorse/preview'
 import Pager from '@/components/Pager/Pager'
 import styles from './page.module.css'
 
@@ -55,6 +56,9 @@ export default function Page() {
     <div>
       <header className="header">
         <h1>Библиотека</h1>
+        <Link href="/upload" className="icon-btn" aria-label="Загрузить текст">
+          <Upload size={20} />
+        </Link>
       </header>
       <label className="search">
         <Search size={18} />
@@ -115,7 +119,7 @@ export default function Page() {
                 </h3>
                 <span className="badge level">{item.level}</span>
               </div>
-              <p>{item.excerpt}</p>
+              <p>{preview(item.excerpt)}</p>
               <div className="meta">
                 <span>★ {item.rating.toFixed(1)}</span>
                 <span>{item.minutes} мин</span>

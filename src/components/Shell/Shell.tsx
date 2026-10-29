@@ -21,7 +21,7 @@ function FrameForPath({ children }: { children: ReactNode }) {
   if (!open && (!ready || !user)) {
     return (
       <Frame nav={false}>
-        <p className="pad muted">Загрузка…</p>
+        <p className="loading">Загрузка…</p>
       </Frame>
     )
   }

@@ -1,4 +1,4 @@
-import { CamelCasePlugin, type GeneratedAlways, Kysely, PostgresDialect } from 'kysely'
+import { CamelCasePlugin, type Generated, type GeneratedAlways, Kysely, PostgresDialect } from 'kysely'
 import { Pool } from 'pg'
 
 type Cefr = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'
@@ -94,7 +94,7 @@ export interface CollectionItems {
   id: GeneratedAlways<string>
   userId: string
   textId: string
-  source: 'library' | 'chat'
+  source: 'library' | 'chat' | 'upload'
   progress: number
   credited: boolean
   addedAt: GeneratedAlways<Date>
@@ -114,6 +114,39 @@ export interface UserWords {
   correct: number
   wrong: number
   mastered: boolean
+  contextEn: string | null
+  contextRu: string | null
+  senseId: string | null
+  dueAt: Generated<Date | null>
+  intervalDays: Generated<number>
+  ease: Generated<number>
+  disagreement: Generated<boolean>
+}
+
+export interface Morphemes {
+  id: GeneratedAlways<string>
+  kind: 'prefix' | 'root' | 'suffix'
+  form: string
+  gloss: string
+}
+
+export interface LemmaMorphemes {
+  lemma: string
+  morphemeId: string
+  position: number
+}
+
+export interface SenseCues {
+  senseId: string
+  cue: string
+}
+
+export interface TextChunks {
+  id: GeneratedAlways<string>
+  textId: string
+  position: number
+  body: string
+  embedding: unknown
 }
 
 export interface ActivityDays {
@@ -176,24 +209,28 @@ export interface Database {
   chatMessages: ChatMessages
   trainingSessions: TrainingSessions
   trainingCards: TrainingCards
+  morphemes: Morphemes
+  lemmaMorphemes: LemmaMorphemes
+  senseCues: SenseCues
+  textChunks: TextChunks
 }
 
 const connectionString = process.env.DATABASE_CONNECTION_STRING
 const supabase = connectionString?.includes('supabase')
 
+const pool = new Pool({
+  connectionString,
+  max: process.env.VERCEL ? 1 : 3,
+  ssl: supabase ? { rejectUnauthorized: false } : undefined,
+})
+
 const database = new Kysely<Database>({
-  dialect: new PostgresDialect({
-    pool: new Pool({
-      connectionString,
-      max: process.env.VERCEL ? 1 : 3,
-      ssl: supabase ? { rejectUnauthorized: false } : undefined
-    })
-  }),
+  dialect: new PostgresDialect({ pool }),
   plugins: [
     new CamelCasePlugin({
-      maintainNestedObjectKeys: true
-    })
-  ]
+      maintainNestedObjectKeys: true,
+    }),
+  ],
 })
 
 export default database

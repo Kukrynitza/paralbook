@@ -2,7 +2,7 @@
 
 import database from '@/modules/database'
 import userId from '@/sorse/userId'
-import { ensureWord } from '@/sorse/query'
+import solver from '@/sorse/solver'
 
 export default async function seedVocabulary(): Promise<{ added: { id: string }[] }> {
   const id = await userId()
@@ -13,22 +13,6 @@ export default async function seedVocabulary(): Promise<{ added: { id: string }[
   if (!profile) {
     throw new Error('Нужно войти')
   }
-  const lemmas = await database
-    .selectFrom('lemmas')
-    .select('lemma')
-    .where('level', '=', profile.cefr)
-    .orderBy('lemma', 'asc')
-    .execute()
-  const added: { id: string }[] = []
-  for (const item of lemmas) {
-    const existing = await database
-      .selectFrom('userWords')
-      .select('id')
-      .where('userId', '=', id)
-      .where('lemma', '=', item.lemma)
-      .executeTakeFirst()
-    if (existing) continue
-    added.push({ id: await ensureWord(database, id, item.lemma, true) })
-  }
-  return { added }
+  const seeded = await solver<{ ids: string[] }>('/vocabulary/seed', { userId: id, level: profile.cefr })
+  return { added: seeded.ids.map((item) => ({ id: item })) }
 }

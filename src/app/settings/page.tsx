@@ -51,10 +51,14 @@ export default function Page() {
 
   async function loadOfferedWords() {
     if (!offerLevel) return
-    const result = await seedVocabulary()
-    markSeedAsked(offerLevel)
-    setOfferLevel(null)
-    notify(result.added.length ? 'Слова загружены' : 'Эти слова уже в словаре')
+    try {
+      const result = await seedVocabulary()
+      markSeedAsked(offerLevel)
+      setOfferLevel(null)
+      notify(result.added.length ? 'Слова загружены' : 'Эти слова уже в словаре')
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось загрузить слова')
+    }
   }
 
   function skipOfferedWords() {
@@ -211,7 +215,7 @@ export default function Page() {
           Выйти
         </button>
         <Link className="btn slim" href="/stats">
-          Статистика недели
+          Статистика
         </Link>
       </div>
       {offerLevel ? (

@@ -1,20 +1,22 @@
 .snack {
   position: fixed;
   left: 50%;
+  top: 24px;
   transform: translateX(-50%);
-  width: min(358px, calc(100vw - 32px));
-  bottom: 92px;
+  width: min(520px, calc(100vw - 32px));
   background: var(--surface);
-  border-radius: 8px;
-  padding: 12px 14px;
-  font-size: 13px;
-  z-index: 7;
+  border-radius: 12px;
+  padding: 18px 20px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  z-index: 20;
   box-shadow: var(--shadow);
-  animation: snack-in 220ms ease;
+  animation: snack-in 320ms ease;
 }
 
 @keyframes snack-in {
-  from { opacity: 0; transform: translate(-50%, 12px); }
+  from { opacity: 0; transform: translate(-50%, -12px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 

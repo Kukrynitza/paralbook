@@ -1,5 +1,6 @@
 'use server'
 
+import { sql } from 'kysely'
 import database from '@/modules/database'
 import userId from '@/sorse/userId'
 import { vocabById } from '@/sorse/query'
@@ -27,13 +28,17 @@ export default async function updateVocabulary(itemId: string, patch: { hint?: s
       throw new Error('Напишите подсказку перед сохранением')
     }
     if (hint.length > HINT_MAX) {
-      throw new Error(`Подсказка короткая, до ${HINT_MAX} символов`)
+      throw new Error(`Подсказка длинная, до ${HINT_MAX} символов`)
     }
     next.hint = hint
   }
   if (patch.mastered) next.mastered = true
   if (next.hint !== undefined || next.mastered !== undefined) {
-    await database.updateTable('userWords').set(next).where('id', '=', itemId).execute()
+    await database
+      .updateTable('userWords')
+      .set(patch.mastered ? { ...next, dueAt: sql`now()` } : next)
+      .where('id', '=', itemId)
+      .execute()
   }
   return vocabById(database, id, itemId)
 }
