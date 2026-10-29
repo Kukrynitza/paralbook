@@ -30,6 +30,39 @@ export function dayKey(value: Date | string) {
   return value.toISOString().slice(0, 10)
 }
 
+export function streakCount(days: string[], today: string) {
+  const unique = [...new Set(days)].sort().reverse()
+  if (!unique.length || !today) return 0
+  const start = unique[0]
+  const yesterday = shiftDay(today, -1)
+  if (start !== today && start !== yesterday) return 0
+  const seen = new Set(unique)
+  let cursor = start
+  let count = 0
+  while (seen.has(cursor)) {
+    count += 1
+    cursor = shiftDay(cursor, -1)
+  }
+  return count
+}
+
+function shiftDay(iso: string, delta: number) {
+  const [year, month, day] = iso.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  date.setUTCDate(date.getUTCDate() + delta)
+  return date.toISOString().slice(0, 10)
+}
+
+export async function touchStreak(db: Db, userId: string) {
+  const todayRow = await sql<{ day: string }>`select current_date::text as day`.execute(db)
+  const today = String(todayRow.rows[0]?.day ?? '').slice(0, 10)
+  const rows = await db.selectFrom('activityDays').select(['day', 'minutes', 'words']).where('userId', '=', userId).execute()
+  const days = rows.filter((row) => Number(row.minutes) > 0 || Number(row.words) > 0).map((row) => dayKey(row.day))
+  const streak = streakCount(days, today)
+  await db.updateTable('profiles').set({ streak }).where('id', '=', userId).execute()
+  return streak
+}
+
 export function recentDays() {
   const labels = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
   const now = new Date()
@@ -57,6 +90,7 @@ export async function addActivity(db: Db, userId: string, minutes: number, words
       }),
     )
     .execute()
+  await touchStreak(db, userId)
 }
 
 export async function todayActivity(db: Db, userId: string) {
@@ -154,7 +188,17 @@ export async function ensureWord(db: Db, userId: string, lemma: string, countTod
   if (existing) return existing.id
   const created = await db
     .insertInto('userWords')
-    .values({ userId, lemma: known.lemma, hint: shortHint(known.hint ?? ''), correct: 0, wrong: 0, mastered: false })
+    .values({
+      userId,
+      lemma: known.lemma,
+      hint: shortHint(known.hint ?? ''),
+      correct: 0,
+      wrong: 0,
+      mastered: false,
+      dueAt: sql`now()`,
+      intervalDays: 0,
+      ease: 2.5,
+    })
     .returning('id')
     .executeTakeFirstOrThrow()
   if (countToday) await addActivity(db, userId, 0, 1)
@@ -186,6 +230,8 @@ export async function vocabById(db: Db, userId: string, itemId: string): Promise
     ipa: row.ipa,
     translation: row.translation,
     example: row.example,
+    contextEn: null,
+    memory: null,
     hint: row.hint,
     correct: row.correct,
     wrong: row.wrong,
@@ -194,24 +240,53 @@ export async function vocabById(db: Db, userId: string, itemId: string): Promise
   }
 }
 
+function bandOf(rank: number) {
+  if (rank >= 1 && rank <= 100) return '1–100'
+  if (rank <= 1000) return '101–1000'
+  if (rank <= 3000) return '1001–3000'
+  return null
+}
+
 export async function cardOf(db: Db, userId: string, lemma: string): Promise<SessionCard | null> {
   const known = await db
     .selectFrom('lemmas')
-    .select(['lemma', 'ipa', 'translation', 'example', 'hint'])
+    .select(['lemma', 'ipa', 'translation', 'example', 'hint', 'level', 'rank'])
     .where('lemma', '=', lemma)
     .executeTakeFirst()
   if (!known) return null
   const word = await db
     .selectFrom('userWords')
-    .select('hint')
+    .select(['hint', 'correct'])
     .where('userId', '=', userId)
     .where('lemma', '=', lemma)
     .executeTakeFirst()
+  const sense = await db
+    .selectFrom('senses')
+    .select('pos')
+    .where('lemma', '=', known.lemma)
+    .orderBy('position', 'asc')
+    .executeTakeFirst()
+  const examples = await db
+    .selectFrom('senseExamples')
+    .innerJoin('senses', 'senses.id', 'senseExamples.senseId')
+    .select(['senseExamples.textEn', 'senseExamples.textRu'])
+    .where('senses.lemma', '=', known.lemma)
+    .orderBy('senses.position', 'asc')
+    .orderBy('senseExamples.position', 'asc')
+    .limit(6)
+    .execute()
   return {
     lemma: known.lemma,
+    display: known.lemma,
     ipa: known.ipa,
     translation: known.translation,
     example: known.example,
     hint: word?.hint || known.hint,
+    note: null,
+    pos: sense?.pos ?? null,
+    level: known.level,
+    band: bandOf(known.rank),
+    review: word?.correct ?? 0,
+    examples,
   }
 }

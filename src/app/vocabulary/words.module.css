@@ -4,10 +4,18 @@
   color: var(--muted);
 }
 
+.tools :global(.icon-btn[aria-label]):hover::after {
+  content: none;
+}
+
 .popover {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 0 16px;
+}
+
+.panel {
+  padding: 12px 16px 0;
 }
 
 .card {

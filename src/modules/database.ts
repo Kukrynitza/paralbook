@@ -1,4 +1,4 @@
-import { CamelCasePlugin, type GeneratedAlways, Kysely, PostgresDialect } from 'kysely'
+import { CamelCasePlugin, type Generated, type GeneratedAlways, Kysely, PostgresDialect } from 'kysely'
 import { Pool } from 'pg'
 
 type Cefr = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'
@@ -94,7 +94,7 @@ export interface CollectionItems {
   id: GeneratedAlways<string>
   userId: string
   textId: string
-  source: 'library' | 'chat'
+  source: 'library' | 'chat' | 'upload'
   progress: number
   credited: boolean
   addedAt: GeneratedAlways<Date>
@@ -114,6 +114,13 @@ export interface UserWords {
   correct: number
   wrong: number
   mastered: boolean
+  contextEn: Generated<string | null>
+  contextRu: Generated<string | null>
+  senseId: Generated<string | null>
+  dueAt: Date | null
+  intervalDays: Generated<number>
+  ease: Generated<number>
+  disagreement: Generated<boolean>
 }
 
 export interface ActivityDays {

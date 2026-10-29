@@ -35,7 +35,7 @@ export interface Today {
 export interface CollectionItem {
   id: string
   textId: string
-  source: 'library' | 'chat'
+  source: 'library' | 'chat' | 'upload'
   published: boolean
   title: string
   excerpt: string
@@ -119,6 +119,8 @@ export interface VocabItem {
   ipa: string | null
   translation: string | null
   example: string | null
+  contextEn: string | null
+  memory: string | null
   hint: string | null
   correct: number
   wrong: number
@@ -128,10 +130,17 @@ export interface VocabItem {
 
 export interface SessionCard {
   lemma: string
+  display: string
   ipa: string | null
   translation: string | null
   example: string | null
   hint: string | null
+  note: string | null
+  pos: string | null
+  level: string | null
+  band: string | null
+  review: number
+  examples: { textEn: string; textRu: string | null }[]
 }
 
 export interface SessionSummary {
@@ -155,11 +164,30 @@ export interface Session {
   summary: SessionSummary | null
 }
 
+export type StatsRange = '7' | '30' | '90' | 'year' | 'all'
+
+export interface StatBar {
+  label: string
+  fresh: number
+  reviewed: number
+  known: number
+  mastered: number
+}
+
+export interface StatTotals {
+  fresh: number
+  reviewed: number
+  known: number
+  mastered: number
+}
+
 export interface Stats {
   streak: number
-  days: { label: string; minutes: number }[]
+  days: StatBar[]
   weekMinutes: number
   goalMin: number
   todayMin: number
   leftMin: number
+  totals: StatTotals
+  week: StatTotals
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Star, Volume2, X } from 'lucide-react'
@@ -13,6 +13,34 @@ import { useUi } from '@/contexts/AuthContext'
 import WordArticle from '@/components/WordArticle/WordArticle'
 import Pager from '@/components/Pager/Pager'
 import styles from './page.module.css'
+
+function wordTokens<T extends { text: string }>(tokens: T[]) {
+  return tokens.filter((token) => token.text.trim())
+}
+
+function splitByShare<T>(items: T[], weights: number[]) {
+  const total = weights.reduce((sum, value) => sum + value, 0)
+  if (!total) return weights.map(() => [] as T[])
+  let used = 0
+  return weights.map((weight, index) => {
+    const start = Math.round((items.length * used) / total)
+    used += weight
+    const end = index === weights.length - 1 ? items.length : Math.round((items.length * used) / total)
+    return items.slice(start, end)
+  })
+}
+
+function russianSlices(pages: ReadPayload['pages']) {
+  const own = pages.map((page) => wordTokens(page.ruTokens))
+  const weights = pages.map((page) => wordTokens(page.tokens).length)
+  if (pages.length < 2) return own
+  const dump = own.findIndex((words, index) => {
+    const rest = own.reduce((sum, item, itemIndex) => (itemIndex === index ? sum : sum + item.length), 0)
+    return words.length > weights[index] * 2 && rest <= 8
+  })
+  if (dump < 0) return own
+  return splitByShare(own[dump], weights)
+}
 
 export default function Page() {
   const params = useParams()
@@ -28,6 +56,12 @@ export default function Page() {
   const [entry, setEntry] = useState<DictEntry | null>(null)
   const [saved, setSaved] = useState(false)
   const lineRef = useRef<HTMLDivElement>(null)
+  const slices = useMemo(() => (data ? russianSlices(data.pages) : []), [data])
+  const slice = slices[page] ?? []
+  const wordCount = data ? wordTokens(data.pages[page]?.tokens ?? []).length : 0
+  const hit = pick?.align === undefined || !slice.length
+    ? undefined
+    : Math.min(slice.length - 1, Math.floor((pick.align * slice.length) / Math.max(1, wordCount)))
 
   useEffect(() => {
     let active = true
@@ -59,16 +93,16 @@ export default function Page() {
   }
 
   useEffect(() => {
-    if (pick?.align === undefined) return
+    if (hit === undefined) return
     const line = lineRef.current
-    const node = line?.querySelector<HTMLElement>(`[data-align="${pick.align}"]`)
+    const node = line?.querySelector<HTMLElement>(`[data-word="${hit}"]`)
     if (!line || !node) return
     const lineBox = line.getBoundingClientRect()
     const wordBox = node.getBoundingClientRect()
     const delta = wordBox.left + wordBox.width / 2 - (lineBox.left + lineBox.width / 2)
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     line.scrollBy({ left: delta, behavior: reduce ? 'auto' : 'smooth' })
-  }, [pick?.align, page])
+  }, [hit, page])
 
   async function onToken(index: number, lemma: string, translation?: string, align?: number) {
     if (pick?.index === index && pick.phase === 'gloss') {
@@ -115,13 +149,16 @@ export default function Page() {
       {finished ? <div className="bar"><i style={{ width: '100%' }} /></div> : null}
       {pick && current ? (
         <div className={styles.parallel}>
-          <div className={styles.line} ref={lineRef} onClick={() => setPick(null)}>
-            {current.ruTokens.map((token, index) => (
-              <span key={index} data-align={index} className={pick.align === index ? styles.ruOn : undefined}>
-                {token.text}
-              </span>
-            ))}
-          </div>
+          {slice.length ? (
+            <div className={styles.line} ref={lineRef} onClick={() => setPick(null)}>
+              {slice.map((token, index) => (
+                <span key={index} data-word={index} className={hit === index ? styles.ruOn : undefined}>
+                  {index ? ' ' : ''}
+                  {token.text}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {pick.translation ? (
             <div className={styles.gloss}>
               <b>{pick.lemma}</b>

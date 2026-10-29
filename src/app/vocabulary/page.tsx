@@ -2,13 +2,14 @@
 import Pager from '@/components/Pager/Pager'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Check, Clock, Eye, Filter, Play, Search, SlidersHorizontal } from 'lucide-react'
 import seedVocabulary from '@/actions/Vocabulary/seedVocabulary'
 import selectVocabulary from '@/actions/Vocabulary/selectVocabulary'
 import { type VocabItem } from '@/sorse/types'
 import { useAuth, useUi } from '@/contexts/AuthContext'
 import { sideColor } from '@/sorse/answerColor'
-import { markSeedAsked, readTraining, seedAskedFor, writeTraining, type TrainSetup } from '@/sorse/prefs'
+import { markSeedAsked, readDailyNew, writeDailyNew } from '@/sorse/prefs'
 import styles from './words.module.css'
 
 function mark(example: string, lemma: string) {
@@ -23,79 +24,120 @@ function mark(example: string, lemma: string) {
   )
 }
 
+const PACKS = [
+  ['own', 'Свои слова'],
+  ['texts', 'Из текстов'],
+  ['r100', '1–100'],
+  ['r1000', '101–1000'],
+  ['r3000', '1001–3000'],
+  ['A1', 'A1'],
+  ['A2', 'A2'],
+  ['B1', 'B1'],
+  ['B2', 'B2'],
+  ['C1', 'C1'],
+  ['C2', 'C2'],
+] as const
+
+const STATUSES = [
+  ['all', 'Все'],
+  ['ok', 'Верно'],
+  ['error', 'Ошибки'],
+  ['sum', 'Сумма'],
+] as const
+
 export default function Page() {
+  const router = useRouter()
   const [page, setPage] = useState(0)
   const { user } = useAuth()
   const { notify } = useUi()
   const [items, setItems] = useState<VocabItem[] | null>(null)
   const [pageItems, setPageItems] = useState<VocabItem[] | null>(null)
+  const [hasWords, setHasWords] = useState<boolean | null>(null)
   const [query, setQuery] = useState('')
-  const [searchOpen, setSearchOpen] = useState(false)
+  const [studyOpen, setStudyOpen] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
   const [status, setStatus] = useState('sum')
   const [confirmSeed, setConfirmSeed] = useState(false)
-  const [trainOpen, setTrainOpen] = useState(false)
-  const [train, setTrain] = useState<TrainSetup>(() => readTraining())
-
-  function load(nextQuery = query, nextStatus = status) {
-    return selectVocabulary(nextQuery, nextStatus).then((data) =>
-      setItems(data.items),
-    )
-  }
+  const [packs, setPacks] = useState<string[]>([])
+  const [daily, setDaily] = useState(10)
 
   useEffect(() => {
     let active = true
-    selectVocabulary(query, status).then((data) => {
+    const narrowed = Boolean(query.trim()) || packs.length > 0 || (status !== 'all' && status !== 'sum')
+    selectVocabulary(query, status, packs).then(async (data) => {
       if (!active) return
       setItems(data.items)
-      if (data.items.length === 0 && !query && status === 'all' && user && !seedAskedFor(user.cefr)) setConfirmSeed(true)
-      })
+      if (data.items.length > 0) {
+        setHasWords(true)
+        return
+      }
+      if (!narrowed) {
+        setHasWords(false)
+        return
+      }
+      const all = await selectVocabulary('', 'all', [])
+      if (!active) return
+      setHasWords(all.items.length > 0)
+    })
     setPage(0)
     return () => {
       active = false
     }
-  }, [query, status, user])
+  }, [query, status, packs])
+
+  useEffect(() => {
+    setDaily(readDailyNew())
+  }, [])
 
   useEffect(() => {
     setPageItems(items?.slice(page * 30, (page + 1) * 30) || null)
-  },[page, items])
-
-  useEffect(() => {
-  },[items?.length])
+  }, [page, items])
 
   function dismissSeed() {
     if (user) markSeedAsked(user.cefr)
     setConfirmSeed(false)
   }
 
-  function changeTrain(next: TrainSetup) {
-    const total = Math.min(50, Math.max(5, next.total))
-    const fresh = Math.min(30, Math.max(0, next.fresh), total)
-    const value = { fresh, total }
-    setTrain(value)
-    writeTraining(value)
+  function resetFilters() {
+    setQuery('')
+    setStatus('sum')
+    setPacks([])
+  }
+
+  function openStudy() {
+    writeDailyNew(daily)
+    const chosen = packs.length ? packs : user ? [user.cefr] : []
+    const next = new URLSearchParams({ daily: String(daily) })
+    if (chosen.length) next.set('packs', chosen.join(','))
+    router.push(`/study?${next.toString()}`)
   }
 
   async function seed() {
-    const result = await seedVocabulary()
-    if (user) markSeedAsked(user.cefr)
-    setConfirmSeed(false)
-    await load('', 'all')
-    setStatus('all')
-    setQuery('')
-    notify(result.added.length ? 'Слова загружены' : 'Эти слова уже в словаре')
+    try {
+      const result = await seedVocabulary()
+      if (user) markSeedAsked(user.cefr)
+      setConfirmSeed(false)
+      setQuery('')
+      setStatus('sum')
+      setPacks([])
+      setPage(0)
+      const data = await selectVocabulary('', 'sum', [])
+      setItems(data.items)
+      setHasWords(data.items.length > 0)
+      notify(result.added.length ? 'Слова загружены' : 'Эти слова уже в словаре')
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось загрузить слова')
+    }
   }
 
-  if (!pageItems) return <p className="pad muted">Загрузка…</p>
+  if (!pageItems || (pageItems.length === 0 && hasWords === null)) return <p className="loading">Загрузка…</p>
+  const dictionaryEmpty = hasWords === false
   return (
     <div>
       <header className="header">
         <h1>Мой словарь</h1>
         <div className={styles.tools}>
-          <button className="icon-btn" aria-label="Поиск" onClick={() => setSearchOpen((value) => !value)}>
-            <Search size={20} />
-          </button>
-          <button className="icon-btn" aria-label="Настройки тренировки" onClick={() => setTrainOpen((value) => !value)}>
+          <button className="icon-btn" aria-label="Повторение" onClick={() => setStudyOpen((value) => !value)}>
             <SlidersHorizontal size={20} />
           </button>
           <button className="icon-btn" aria-label="Фильтр" onClick={() => setFilterOpen((value) => !value)}>
@@ -103,61 +145,56 @@ export default function Page() {
           </button>
         </div>
       </header>
-      {searchOpen ? (
-        <label className="search">
-          <Search size={18} />
-          <input value={query} placeholder="Слово" onChange={(event) => setQuery(event.target.value)} />
-        </label>
-      ) : null}
-      {trainOpen ? (
+      <label className="search">
+        <Search size={18} />
+        <input value={query} placeholder="Слово" onChange={(event) => setQuery(event.target.value)} />
+      </label>
+      {studyOpen ? (
         <div className="pad stack">
-          <strong>Тренировка</strong>
-          <div>
-            <div className="row">
-              <span>Новые слова</span>
-              <span className="muted">{train.fresh}</span>
-            </div>
-            <input
-              className={styles.range}
-              type="range"
-              min={0}
-              max={30}
-              value={train.fresh}
-              onChange={(event) => changeTrain({ ...train, fresh: Number(event.target.value) })}
-            />
+          <div className={styles.popover}>
+            {PACKS.map(([id, label]) => (
+              <button
+                key={id}
+                className={packs.includes(id) ? 'chip on' : 'chip'}
+                onClick={() => setPacks((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])}
+              >
+                {label}
+              </button>
+            ))}
           </div>
           <div>
             <div className="row">
-              <span>Всего карточек</span>
-              <span className="muted">{train.total}</span>
+              <span>Новых в день</span>
+              <span className="muted">{daily}</span>
             </div>
             <input
               className={styles.range}
               type="range"
               min={5}
-              max={50}
-              value={train.total}
-              onChange={(event) => changeTrain({ ...train, total: Number(event.target.value) })}
+              max={60}
+              value={daily}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                setDaily(value)
+                writeDailyNew(value)
+              }}
             />
           </div>
-          <p className="small muted">Повтор: {train.total - train.fresh}. Эти числа применятся при запуске тренировки.</p>
+          <button className="btn" onClick={openStudy}>
+            Выбрать режим
+          </button>
         </div>
       ) : null}
       {filterOpen ? (
-        <div className={styles.popover} style={{ paddingTop: 12 }}>
-          {[
-            ['all', 'Все'],
-            ['ok', 'Верно'],
-            ['error', 'Ошибки'],
-            ['sum', 'Сумма'],
-          ].map(([id, label]) => (
+        <div className={`${styles.popover} ${styles.panel}`}>
+          {STATUSES.map(([id, label]) => (
             <button key={id} className={status === id ? 'chip on' : 'chip'} onClick={() => setStatus(id)}>
               {label}
             </button>
           ))}
         </div>
       ) : null}
-      {pageItems?.length === 0 && !query && status === 'all' ? (
+      {dictionaryEmpty ? (
         <div className="empty">
           <h2>Словарь пуст</h2>
           <p>Загрузите слова своего уровня или добавляйте их из текста.</p>
@@ -167,32 +204,40 @@ export default function Page() {
             Загрузить слова для моего уровня
           </button>
         </div>
+      ) : pageItems.length === 0 ? (
+        <div className="empty">
+          <h2>По этому фильтру слов нет</h2>
+          <p>Сбросьте поиск, пачку или статус, чтобы снова увидеть свои слова.</p>
+          <button className="btn ghost" onClick={resetFilters}>
+            Сбросить
+          </button>
+        </div>
       ) : (
         <ul>
-        <div className="list">
-          {pageItems?.map((item) => (
-            <Link key={item.id} href={`/vocabulary/${item.id}`} className={item.tone === 'ok' ? `${styles.card} ${styles.ok}` : `${styles.card} ${styles.error}`} style={sideColor(item.correct, item.wrong)}>
-              <div className="row">
-                <h3>{item.lemma}</h3>
-                {item.tone === 'ok' ? <Check size={16} color="var(--ok)" /> : <Clock size={16} color="var(--danger)" />}
-              </div>
-              <p>{item.example ? mark(item.example, item.lemma) : item.translation}</p>
-              <div className={item.tone === 'ok' ? `${styles.stats} ${styles.statsOk}` : `${styles.stats} ${styles.statsError}`}>
-                Верно: {item.correct} · Ошибки: {item.wrong}
-              </div>
-            </Link>
-          ))}
-        </div>
-        <Pager
-        className={styles.pager}
-        page={page + 1}
-        pages={items?.length ? Math.ceil(items.length / 30) : 0}
-        onPage={(next) => setPage(next - 1)}
-      />
-      </ul>
+          <div className="list">
+            {pageItems.map((item) => (
+              <Link key={item.id} href={`/vocabulary/${item.id}`} className={item.tone === 'ok' ? `${styles.card} ${styles.ok}` : `${styles.card} ${styles.error}`} style={sideColor(item.correct, item.wrong)}>
+                <div className="row">
+                  <h3>{item.lemma}</h3>
+                  {item.tone === 'ok' ? <Check size={16} color="var(--ok)" /> : <Clock size={16} color="var(--danger)" />}
+                </div>
+                <p>{item.example ? mark(item.example, item.lemma) : item.translation}</p>
+                <div className={item.tone === 'ok' ? `${styles.stats} ${styles.statsOk}` : `${styles.stats} ${styles.statsError}`}>
+                  Верно: {item.correct} · Ошибки: {item.wrong}
+                </div>
+              </Link>
+            ))}
+          </div>
+          <Pager
+            className={styles.pager}
+            page={page + 1}
+            pages={items?.length ? Math.ceil(items.length / 30) : 0}
+            onPage={(next) => setPage(next - 1)}
+          />
+        </ul>
       )}
-      {pageItems?.length > 0 ? (
-        <Link className={styles.fab} href="/train" aria-label="Тренировка">
+      {pageItems.length > 0 ? (
+        <Link className={styles.fab} href="/study" aria-label="Режимы повторения" title="Режимы повторения">
           <Play size={24} fill="currentColor" />
         </Link>
       ) : null}
