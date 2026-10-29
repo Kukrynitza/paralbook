@@ -28,7 +28,6 @@ export interface Today {
   readingMin: number
   words: number
   goalMin: number
-  leftMin: number
   friends: Friend[]
 }
 
@@ -145,27 +144,6 @@ export interface SessionCard {
   examples: { textEn: string; textRu: string | null }[]
 }
 
-export interface SessionSummary {
-  minutes: number
-  words: number
-  correct: number
-  wrong: number
-  streak: number
-  goalMin: number
-  todayMin: number
-  compliment: string
-}
-
-export interface Session {
-  id: string
-  index: number
-  total: number
-  done: boolean
-  card: SessionCard | null
-  next: { lemma: string } | null
-  summary: SessionSummary | null
-}
-
 export type StatsRange = '7' | '30' | '90' | 'year' | 'all'
 
 export interface StatBar {
@@ -187,9 +165,6 @@ export interface Stats {
   streak: number
   days: StatBar[]
   weekMinutes: number
-  goalMin: number
-  todayMin: number
-  leftMin: number
   totals: StatTotals
   week: StatTotals
 }

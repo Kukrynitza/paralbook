@@ -60,16 +60,6 @@ export async function touchStreak(db: Db, userId: string) {
   return streak
 }
 
-export function recentDays() {
-  const labels = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
-  const now = new Date()
-  return Array.from({ length: 7 }, (_, index) => {
-    const offset = 6 - index
-    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - offset))
-    return { key: date.toISOString().slice(0, 10), label: labels[date.getUTCDay()] }
-  })
-}
-
 export async function addActivity(db: Db, userId: string, minutes: number, words: number) {
   if (!minutes && !words) return
   await db

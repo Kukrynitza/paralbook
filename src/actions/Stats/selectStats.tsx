@@ -69,7 +69,7 @@ export default async function selectStats(range: StatsRange = '7'): Promise<Stat
   await touchStreak(database, id)
   const profile = await database
     .selectFrom('profiles')
-    .select(['streak', 'dailyGoalMin'])
+    .select('streak')
     .where('id', '=', id)
     .executeTakeFirst()
   if (!profile) {
@@ -172,14 +172,10 @@ export default async function selectStats(range: StatsRange = '7'): Promise<Stat
     mastered: Number(totalRow?.mastered ?? 0),
   }
   const weekMinutes = [...minutes.entries()].reduce((sum, [day, value]) => (day >= weekStart && day <= today ? sum + value : sum), 0)
-  const todayMin = minutes.get(today) ?? 0
   return {
     streak: profile.streak,
     days: chart,
     weekMinutes,
-    goalMin: profile.dailyGoalMin,
-    todayMin,
-    leftMin: Math.max(0, profile.dailyGoalMin - todayMin),
     totals,
     week,
   }

@@ -146,23 +146,6 @@ export interface ChatMessages {
   createdAt: GeneratedAlways<Date>
 }
 
-export interface TrainingSessions {
-  id: GeneratedAlways<string>
-  userId: string
-  cardIndex: number
-  correct: number
-  wrong: number
-  minutes: number
-  createdAt: GeneratedAlways<Date>
-}
-
-export interface TrainingCards {
-  id: GeneratedAlways<string>
-  sessionId: string
-  position: number
-  lemma: string
-}
-
 export interface Database {
   profiles: Profiles
   texts: Texts
@@ -179,8 +162,6 @@ export interface Database {
   activityDays: ActivityDays
   friendships: Friendships
   chatMessages: ChatMessages
-  trainingSessions: TrainingSessions
-  trainingCards: TrainingCards
 }
 
 const connectionString = process.env.DATABASE_CONNECTION_STRING

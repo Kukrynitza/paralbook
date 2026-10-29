@@ -24,7 +24,6 @@ export default async function selectToday(): Promise<Today> {
     readingMin: today.minutes,
     words: today.words,
     goalMin: profile.dailyGoalMin,
-    leftMin: Math.max(0, profile.dailyGoalMin - today.minutes),
     friends: friends.slice(0, 2),
   }
 }

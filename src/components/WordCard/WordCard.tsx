@@ -1,7 +1,7 @@
 import { Eye, RotateCcw, Volume2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { SessionCard } from '@/sorse/types'
-import styles from '@/app/train/page.module.css'
+import styles from '@/app/study/page.module.css'
 
 export default function WordCard({
   card,

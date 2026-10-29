@@ -11,7 +11,7 @@ import WordCard from '@/components/WordCard/WordCard'
 import { useAuth, useUi } from '@/contexts/AuthContext'
 import { readDailyNew, writeDailyNew } from '@/sorse/prefs'
 import { LEVELS, type SessionCard } from '@/sorse/types'
-import styles from '../train/page.module.css'
+import styles from './page.module.css'
 
 const PACKS = [
   ['own', 'Свои слова'],
@@ -415,12 +415,12 @@ function Study() {
         </div>
       </div>
       <div className="actions pad">
-        <button className="btn yes" disabled={leave !== null} onClick={() => answer(true)}>
-          <ArrowLeft size={16} />
-          Знаю
-        </button>
         <button className="btn no" disabled={leave !== null} onClick={() => answer(false)}>
+          <ArrowLeft size={16} />
           Не знаю
+        </button>
+        <button className="btn yes" disabled={leave !== null} onClick={() => answer(true)}>
+          Знаю
           <ArrowRight size={16} />
         </button>
       </div>
