@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Plus, Search, ThumbsDown, ThumbsUp, X } from 'lucide-react'
+import { Plus, Search, X } from 'lucide-react'
 import saveLibrary from '@/actions/Library/saveLibrary'
 import selectLibrary from '@/actions/Library/selectLibrary'
 import voteLibrary from '@/actions/Library/voteLibrary'
 import { type LibraryItem, type PageResult } from '@/sorse/types'
 import { useUi } from '@/contexts/AuthContext'
 import Pager from '@/components/Pager/Pager'
-import styles from './page.module.css'
+import Stars from '@/components/Stars/Stars'
 
 const sorts = [
   { id: 'new', label: 'Новые' },
@@ -31,11 +31,22 @@ export default function Page() {
     return () => window.clearTimeout(handle)
   }, [page, query, sort])
 
-  async function vote(item: LibraryItem, value: 'like' | 'dislike') {
-    const next = await voteLibrary(item.id, value)
-    setList((current) =>
-      current ? { ...current, items: current.items.map((entry) => (entry.id === next.id ? next : entry)) } : current,
-    )
+  async function vote(item: LibraryItem, value: number) {
+    try {
+      const next = await voteLibrary(item.id, value)
+      setList((current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((entry) =>
+                entry.id === item.id ? { ...entry, rating: next.rating, score: next.score } : entry,
+              ),
+            }
+          : current,
+      )
+    } catch (reason: unknown) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось сохранить оценку')
+    }
   }
 
   async function save(item: LibraryItem) {
@@ -95,7 +106,6 @@ export default function Page() {
           </button>
         ))}
       </div>
-      <p className={`${styles.hint} small muted`}>Оценки меняют только рейтинг</p>
       {empty ? (
         <div className="empty">
           <Search size={28} />
@@ -117,20 +127,16 @@ export default function Page() {
               </div>
               <p>{item.excerpt}</p>
               <div className="meta">
-                <span>★ {item.rating.toFixed(1)}</span>
+                {item.saved ? (
+                  <Stars average={item.rating} mine={item.score} onPick={(value) => vote(item, value)} />
+                ) : item.rating == null ? null : (
+                  <span>★ {item.rating.toFixed(1)}</span>
+                )}
                 <span>{item.minutes} мин</span>
                 <span>{item.topic}</span>
               </div>
               <div className="row" style={{ marginTop: 12 }}>
-                <div className="gap8">
-                  <button className={item.vote === 'dislike' ? `${styles.vote} ${styles.on}` : styles.vote} onClick={() => vote(item, 'dislike')} aria-label="Не нравится">
-                    <ThumbsDown size={16} />
-                  </button>
-                  <button className={item.vote === 'like' ? `${styles.vote} ${styles.on}` : styles.vote} onClick={() => vote(item, 'like')} aria-label="Нравится">
-                    <ThumbsUp size={16} />
-                  </button>
-                </div>
-                <button className="btn ghost slim" style={{ width: 'auto' }} disabled={item.saved} onClick={() => save(item)}>
+                <button className="btn ghost slim" style={{ width: 'auto', marginLeft: 'auto' }} disabled={item.saved} onClick={() => save(item)}>
                   <Plus size={16} />
                   {item.saved ? 'В подборке' : 'В подборку'}
                 </button>

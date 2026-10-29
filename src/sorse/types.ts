@@ -42,7 +42,8 @@ export interface CollectionItem {
   minutes: number
   level: Cefr
   topic: string
-  rating: number
+  rating: number | null
+  score: number | null
   progress: number
   createdAt: string
 }
@@ -54,8 +55,8 @@ export interface LibraryItem {
   minutes: number
   level: Cefr
   topic: string
-  rating: number
-  vote: 'like' | 'dislike' | null
+  rating: number | null
+  score: number | null
   saved: boolean
   createdAt: string
 }

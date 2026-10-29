@@ -8,9 +8,11 @@ import removeFromCollection from '@/actions/Collection/removeFromCollection'
 import selectCollection from '@/actions/Collection/selectCollection'
 import selectToday from '@/actions/Collection/selectToday'
 import deleteText from '@/actions/Reading/deleteText'
+import voteLibrary from '@/actions/Library/voteLibrary'
 import { type CollectionItem, type PageResult, type Today } from '@/sorse/types'
 import { useUi } from '@/contexts/AuthContext'
 import Pager from '@/components/Pager/Pager'
+import Stars from '@/components/Stars/Stars'
 import Ring from '@/components/Ring/Ring'
 import dayWord from '@/sorse/dayWord'
 import friendStyles from '@/components/FriendCard/FriendCard.module.css'
@@ -57,6 +59,24 @@ export default function Page() {
     else await removeFromCollection(item.id)
     setList(await selectCollection(sort, page))
     notify('Сохранено')
+  }
+
+  async function vote(item: CollectionItem, value: number) {
+    try {
+      const next = await voteLibrary(item.textId, value)
+      setList((current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((entry) =>
+                entry.textId === item.textId ? { ...entry, rating: next.rating, score: next.score } : entry,
+              ),
+            }
+          : current,
+      )
+    } catch (reason: unknown) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось сохранить оценку')
+    }
   }
 
   async function publish(item: CollectionItem) {
@@ -180,7 +200,7 @@ export default function Page() {
               </h3>
               <p>{item.excerpt}</p>
               <div className="meta">
-                <span>★ {item.rating.toFixed(1)}</span>
+                <Stars average={item.rating} mine={item.score} onPick={(value) => vote(item, value)} />
                 <span>{item.minutes} мин</span>
                 <span>{item.topic}</span>
               </div>

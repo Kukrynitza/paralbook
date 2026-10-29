@@ -103,7 +103,7 @@ export interface CollectionItems {
 export interface Votes {
   userId: string
   textId: string
-  value: 'like' | 'dislike'
+  score: number
 }
 
 export interface UserWords {
@@ -115,12 +115,9 @@ export interface UserWords {
   wrong: number
   mastered: boolean
   contextEn: Generated<string | null>
-  contextRu: Generated<string | null>
-  senseId: Generated<string | null>
   dueAt: Date | null
   intervalDays: Generated<number>
   ease: Generated<number>
-  disagreement: Generated<boolean>
 }
 
 export interface ActivityDays {

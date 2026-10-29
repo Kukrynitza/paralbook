@@ -1,7 +1,7 @@
 import { sql, type Kysely, type Transaction } from 'kysely'
 import type { Database } from '@/modules/database'
 import { shortHint } from '@/sorse/hint'
-import type { Friend, LibraryItem, SessionCard, VocabItem } from '@/sorse/types'
+import type { Friend, SessionCard, VocabItem } from '@/sorse/types'
 
 export const PAGE_SIZE = 4
 
@@ -14,10 +14,10 @@ export function pageOf<T>(items: T[], page: number) {
   return { page: current, pages, total: items.length, items: items.slice(start, start + PAGE_SIZE) }
 }
 
-export function ratingOf(base: number | string, likes: number, dislikes: number) {
-  const value = Number(base) + likes * 0.1 - dislikes * 0.1
-  const clamped = Math.min(5, Math.max(0, value))
-  return Math.round(clamped * 10) / 10
+export function averageScore(scores: number[]) {
+  if (!scores.length) return null
+  const value = scores.reduce((sum, item) => sum + item, 0) / scores.length
+  return Math.round(value * 10) / 10
 }
 
 export function displayName(email: string) {
@@ -134,42 +134,6 @@ export async function friendsOf(db: Db, userId: string): Promise<Friend[]> {
 
 export function vocabTone(correct: number, wrong: number): VocabItem['tone'] {
   return correct > wrong ? 'ok' : 'error'
-}
-
-export async function libraryCard(db: Db, userId: string, textId: string): Promise<LibraryItem> {
-  const text = await db
-    .selectFrom('texts')
-    .select(['id', 'title', 'excerpt', 'minutes', 'level', 'topic', 'baseRating', 'published', 'createdAt'])
-    .where('id', '=', textId)
-    .executeTakeFirst()
-  if (!text || !text.published) throw new Error('Текст не опубликован')
-  const votes = await db.selectFrom('votes').select('value').where('textId', '=', textId).execute()
-  const mine = await db
-    .selectFrom('votes')
-    .select('value')
-    .where('textId', '=', textId)
-    .where('userId', '=', userId)
-    .executeTakeFirst()
-  const saved = await db
-    .selectFrom('collectionItems')
-    .select('id')
-    .where('textId', '=', textId)
-    .where('userId', '=', userId)
-    .executeTakeFirst()
-  const likes = votes.filter((item) => item.value === 'like').length
-  const dislikes = votes.length - likes
-  return {
-    id: text.id,
-    title: text.title,
-    excerpt: text.excerpt,
-    minutes: text.minutes,
-    level: text.level,
-    topic: text.topic,
-    rating: ratingOf(text.baseRating, likes, dislikes),
-    vote: mine?.value ?? null,
-    saved: Boolean(saved),
-    createdAt: new Date(text.createdAt).toISOString(),
-  }
 }
 
 export async function ensureWord(db: Db, userId: string, lemma: string, countToday: boolean) {

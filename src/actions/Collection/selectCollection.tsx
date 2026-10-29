@@ -2,7 +2,7 @@
 
 import database from '@/modules/database'
 import userId from '@/sorse/userId'
-import { pageOf, ratingOf } from '@/sorse/query'
+import { averageScore, pageOf } from '@/sorse/query'
 import type { CollectionItem, PageResult } from '@/sorse/types'
 
 export default async function selectCollection(sort: string, page: number): Promise<PageResult<CollectionItem>> {
@@ -24,15 +24,14 @@ export default async function selectCollection(sort: string, page: number): Prom
       'texts.minutes',
       'texts.level',
       'texts.topic',
-      'texts.baseRating',
       'texts.published',
     ])
     .where('collectionItems.userId', '=', id)
     .execute()
-  const votes = await database.selectFrom('votes').select(['textId', 'value']).execute()
+  const votes = await database.selectFrom('votes').select(['userId', 'textId', 'score']).execute()
   const items = rows.map((row) => {
-    const likes = votes.filter((item) => item.textId === row.textId && item.value === 'like').length
-    const dislikes = votes.filter((item) => item.textId === row.textId && item.value === 'dislike').length
+    const scores = votes.filter((item) => item.textId === row.textId)
+    const mine = scores.find((item) => item.userId === id)
     return {
       id: row.id,
       textId: row.textId,
@@ -43,7 +42,8 @@ export default async function selectCollection(sort: string, page: number): Prom
       minutes: row.minutes,
       level: row.level,
       topic: row.topic,
-      rating: ratingOf(row.baseRating, likes, dislikes),
+      rating: averageScore(scores.map((item) => Number(item.score))),
+      score: mine ? Number(mine.score) : null,
       progress: Number(row.progress),
       createdAt: new Date(row.addedAt).toISOString(),
     }

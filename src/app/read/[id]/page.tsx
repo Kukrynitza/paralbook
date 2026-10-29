@@ -50,12 +50,13 @@ export default function Page() {
   const [data, setData] = useState<ReadPayload | null>(null)
   const [error, setError] = useState('')
   const [page, setPage] = useState(0)
-  const [progress, setProgress] = useState(0)
+  const [along, setAlong] = useState(0)
   const [finished, setFinished] = useState(false)
   const [pick, setPick] = useState<{ index: number; lemma: string; translation?: string; align?: number; phase: 'gloss' | 'popup' } | null>(null)
   const [entry, setEntry] = useState<DictEntry | null>(null)
   const [saved, setSaved] = useState(false)
   const lineRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const slices = useMemo(() => (data ? russianSlices(data.pages) : []), [data])
   const slice = slices[page] ?? []
   const wordCount = data ? wordTokens(data.pages[page]?.tokens ?? []).length : 0
@@ -71,7 +72,7 @@ export default function Page() {
         if (!active) return
         setData(value)
         setPage(value.page)
-        setProgress(value.progress)
+        setAlong(0)
         setFinished(false)
       })
       .catch((reason: unknown) => {
@@ -86,11 +87,36 @@ export default function Page() {
     if (!data) return
     const value = Math.max(0, next)
     const result = await saveProgress(id, value)
-    setProgress(result.progress)
     setFinished(result.finished)
-    if (!result.finished) setPage(result.page)
+    if (!result.finished) {
+      setPage(result.page)
+      setAlong(0)
+    }
     setPick(null)
   }
+
+  useEffect(() => {
+    const node = scrollRef.current
+    if (!node) return
+    node.scrollTop = 0
+  }, [page])
+
+  useEffect(() => {
+    const node = scrollRef.current
+    if (!node) return
+    const measure = () => {
+      const room = node.scrollHeight - node.clientHeight
+      setAlong(room <= 0 ? 1 : Math.min(1, Math.max(0, node.scrollTop / room)))
+    }
+    measure()
+    node.addEventListener('scroll', measure, { passive: true })
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => {
+      node.removeEventListener('scroll', measure)
+      observer.disconnect()
+    }
+  }, [page, data, finished, pick])
 
   useEffect(() => {
     if (hit === undefined) return
@@ -135,7 +161,9 @@ export default function Page() {
   if (error) return <p className="form-error pad">{error}</p>
   if (!data) return <p className="pad muted">Загрузка…</p>
   const current = data.pages[page]
-  const percent = `${Math.round((finished ? 1 : progress) * 100)}%`
+  const percent = finished
+    ? '100%'
+    : `${Math.round(((page + along) / Math.max(1, data.pageCount)) * 100)}%`
 
   return (
     <div className={styles.screen}>
@@ -167,7 +195,7 @@ export default function Page() {
           ) : null}
         </div>
       ) : null}
-      <div className={styles.scroll}>
+      <div className={styles.scroll} ref={scrollRef}>
         <p className={styles.text}>
           {current?.tokens.map((token, index) =>
             token.lemma ? (
