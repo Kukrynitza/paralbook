@@ -97,6 +97,7 @@ export interface CollectionItems {
   source: 'library' | 'chat' | 'upload'
   progress: number
   credited: boolean
+  pinned: Generated<boolean>
   addedAt: GeneratedAlways<Date>
 }
 

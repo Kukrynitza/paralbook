@@ -1,8 +1,9 @@
 'use server'
 
+import { sql } from 'kysely'
 import database from '@/modules/database'
 import userId from '@/sorse/userId'
-import { addActivity, cardOf, todayActivity } from '@/sorse/query'
+import { cardOf, todayActivity } from '@/sorse/query'
 import type { Session } from '@/sorse/types'
 
 const COMPLIMENT = 'Так держать — слова возвращаются вовремя.'
@@ -62,14 +63,25 @@ export default async function startSession(newWords: number, total: number): Pro
   if (newWords < 0 || newWords > 30 || total < 5 || total > 50 || newWords > total) {
     throw new Error('Новых от 0 до 30, всего от 5 до 50, новых не больше всего')
   }
-  const owned = await database.selectFrom('userWords').select(['lemma', 'wrong', 'mastered']).where('userId', '=', id).execute()
-  const ownedLemmas = new Set(owned.map((item) => item.lemma))
-  const fresh = await database.selectFrom('lemmas').select('lemma').orderBy('rank', 'asc').execute()
-  const freshCards = fresh.filter((item) => !ownedLemmas.has(item.lemma)).slice(0, newWords).map((item) => item.lemma)
-  const review = owned
-    .filter((item) => !item.mastered)
-    .sort((a, b) => b.wrong - a.wrong)
-    .map((item) => item.lemma)
+  const fresh = newWords
+    ? await database
+        .selectFrom('lemmas')
+        .select('lemma')
+        .where(sql<boolean>`not exists (select 1 from user_words where user_words.user_id = ${id} and user_words.lemma = lemmas.lemma)`)
+        .orderBy('rank', 'asc')
+        .limit(newWords)
+        .execute()
+    : []
+  const freshCards = fresh.map((item) => item.lemma)
+  const reviewRows = await database
+    .selectFrom('userWords')
+    .select('lemma')
+    .where('userId', '=', id)
+    .where('mastered', '=', false)
+    .orderBy('wrong', 'desc')
+    .limit(total)
+    .execute()
+  const review = reviewRows.map((item) => item.lemma)
   const pool = [...freshCards, ...review]
   if (!pool.length) {
     throw new Error('В словаре пока нет слов')

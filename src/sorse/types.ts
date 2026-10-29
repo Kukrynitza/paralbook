@@ -45,6 +45,7 @@ export interface CollectionItem {
   rating: number | null
   score: number | null
   progress: number
+  pinned: boolean
   createdAt: string
 }
 

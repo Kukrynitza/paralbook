@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Settings } from 'lucide-react'
+import { Pin, Settings } from 'lucide-react'
+import pinCollection from '@/actions/Collection/pinCollection'
 import publishCollection from '@/actions/Collection/publishCollection'
 import removeFromCollection from '@/actions/Collection/removeFromCollection'
 import selectCollection from '@/actions/Collection/selectCollection'
@@ -12,8 +13,8 @@ import voteLibrary from '@/actions/Library/voteLibrary'
 import { type CollectionItem, type PageResult, type Today } from '@/sorse/types'
 import { useUi } from '@/contexts/AuthContext'
 import Pager from '@/components/Pager/Pager'
-import Stars from '@/components/Stars/Stars'
 import Ring from '@/components/Ring/Ring'
+import Stars from '@/components/Stars/Stars'
 import dayWord from '@/sorse/dayWord'
 import friendStyles from '@/components/FriendCard/FriendCard.module.css'
 import styles from './page.module.css'
@@ -79,6 +80,15 @@ export default function Page() {
     }
   }
 
+  async function pin(item: CollectionItem) {
+    try {
+      await pinCollection(item.id)
+      setList(await selectCollection(sort, page))
+    } catch (reason: unknown) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось закрепить')
+    }
+  }
+
   async function publish(item: CollectionItem) {
     await publishCollection(item.id)
     setList(await selectCollection(sort, page))
@@ -127,16 +137,6 @@ export default function Page() {
               <div className={styles.cap}>
                 {today.readingMin}/{today.goalMin}
               </div>
-            </div>
-          </div>
-          <div className={styles.status}>
-            <div>
-              {today.leftMin > 0 ? `Ещё ${today.leftMin} мин` : 'Цель закрыта'}
-              <small>{today.leftMin > 0 ? 'до цели дня' : 'на сегодня'}</small>
-            </div>
-            <div className={styles.right}>
-              {today.readingMin} мин
-              <small>уже сегодня</small>
             </div>
           </div>
         </section>
@@ -191,17 +191,22 @@ export default function Page() {
             <article className="card" key={item.id}>
               <div className="row">
                 <span className="badge">{item.source === 'chat' && !item.published ? 'Создано в чате' : 'Библиотека'}</span>
-                <span className="small muted">
-                  {item.minutes} мин · {item.level}
-                </span>
+                <button
+                  type="button"
+                  className={item.pinned ? styles.pinOn : styles.pin}
+                  onClick={() => pin(item)}
+                >
+                  <Pin size={16} fill={item.pinned ? 'currentColor' : 'none'} />
+                </button>
               </div>
               <h3>
                 <Link href={`/read/${item.textId}`}>{item.title}</Link>
               </h3>
-              <p>{item.excerpt}</p>
+              <p className={styles.excerpt}>{item.excerpt}</p>
               <div className="meta">
                 <Stars average={item.rating} mine={item.score} onPick={(value) => vote(item, value)} />
-                <span>{item.minutes} мин</span>
+                <span>{(item.progress * 100).toFixed(2)}%</span>
+                <span>{item.minutes} мин · {item.level}</span>
                 <span>{item.topic}</span>
               </div>
               {item.source === 'chat' && !item.published ? (

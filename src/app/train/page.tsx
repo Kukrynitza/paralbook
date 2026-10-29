@@ -175,12 +175,12 @@ export default function Page() {
         </div>
         <div className="actions pad">
           <button className="btn no" disabled={leave !== null} onClick={() => answer(false)}>
-            <ArrowLeft size={16} />
+            <ArrowRight size={16} />
             Не помню
-          </button>
           <button className="btn yes" disabled={leave !== null} onClick={() => answer(true)}>
             Помню
-            <ArrowRight size={16} />
+            <ArrowLeft size={16} />
+          </button>
           </button>
         </div>
       </div>

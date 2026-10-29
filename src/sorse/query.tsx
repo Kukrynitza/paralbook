@@ -3,15 +3,12 @@ import type { Database } from '@/modules/database'
 import { shortHint } from '@/sorse/hint'
 import type { Friend, SessionCard, VocabItem } from '@/sorse/types'
 
-export const PAGE_SIZE = 4
-
 type Db = Kysely<Database> | Transaction<Database>
 
-export function pageOf<T>(items: T[], page: number) {
-  const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
+export function pageWindow(total: number, page: number, size: number) {
+  const pages = Math.max(1, Math.ceil(total / size))
   const current = Math.min(pages, Math.max(1, page || 1))
-  const start = (current - 1) * PAGE_SIZE
-  return { page: current, pages, total: items.length, items: items.slice(start, start + PAGE_SIZE) }
+  return { page: current, pages, total, offset: (current - 1) * size }
 }
 
 export function averageScore(scores: number[]) {

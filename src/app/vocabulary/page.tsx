@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Check, Clock, Eye, Filter, Play, Search, SlidersHorizontal } from 'lucide-react'
 import seedVocabulary from '@/actions/Vocabulary/seedVocabulary'
 import selectVocabulary from '@/actions/Vocabulary/selectVocabulary'
-import { type VocabItem } from '@/sorse/types'
+import { type PageResult, type VocabItem } from '@/sorse/types'
 import { useAuth, useUi } from '@/contexts/AuthContext'
 import { sideColor } from '@/sorse/answerColor'
 import { markSeedAsked, readDailyNew, writeDailyNew } from '@/sorse/prefs'
@@ -47,11 +47,10 @@ const STATUSES = [
 
 export default function Page() {
   const router = useRouter()
-  const [page, setPage] = useState(0)
+  const [page, setPage] = useState(1)
   const { user } = useAuth()
   const { notify } = useUi()
-  const [items, setItems] = useState<VocabItem[] | null>(null)
-  const [pageItems, setPageItems] = useState<VocabItem[] | null>(null)
+  const [list, setList] = useState<(PageResult<VocabItem> & { hasWords: boolean }) | null>(null)
   const [hasWords, setHasWords] = useState<boolean | null>(null)
   const [query, setQuery] = useState('')
   const [studyOpen, setStudyOpen] = useState(false)
@@ -63,35 +62,19 @@ export default function Page() {
 
   useEffect(() => {
     let active = true
-    const narrowed = Boolean(query.trim()) || packs.length > 0 || (status !== 'all' && status !== 'sum')
-    selectVocabulary(query, status, packs).then(async (data) => {
+    selectVocabulary(query, status, packs, page).then((data) => {
       if (!active) return
-      setItems(data.items)
-      if (data.items.length > 0) {
-        setHasWords(true)
-        return
-      }
-      if (!narrowed) {
-        setHasWords(false)
-        return
-      }
-      const all = await selectVocabulary('', 'all', [])
-      if (!active) return
-      setHasWords(all.items.length > 0)
+      setList(data)
+      setHasWords(data.hasWords)
     })
-    setPage(0)
     return () => {
       active = false
     }
-  }, [query, status, packs])
+  }, [page, query, status, packs])
 
   useEffect(() => {
     setDaily(readDailyNew())
   }, [])
-
-  useEffect(() => {
-    setPageItems(items?.slice(page * 30, (page + 1) * 30) || null)
-  }, [page, items])
 
   function dismissSeed() {
     if (user) markSeedAsked(user.cefr)
@@ -102,6 +85,7 @@ export default function Page() {
     setQuery('')
     setStatus('sum')
     setPacks([])
+    setPage(1)
   }
 
   function openStudy() {
@@ -120,17 +104,18 @@ export default function Page() {
       setQuery('')
       setStatus('sum')
       setPacks([])
-      setPage(0)
-      const data = await selectVocabulary('', 'sum', [])
-      setItems(data.items)
-      setHasWords(data.items.length > 0)
+      setPage(1)
+      const data = await selectVocabulary('', 'sum', [], 1)
+      setList(data)
+      setHasWords(data.hasWords)
       notify(result.added.length ? 'Слова загружены' : 'Эти слова уже в словаре')
     } catch (reason) {
       notify(reason instanceof Error ? reason.message : 'Не удалось загрузить слова')
     }
   }
 
-  if (!pageItems || (pageItems.length === 0 && hasWords === null)) return <p className="loading">Загрузка…</p>
+  if (!list || hasWords === null) return <p className="loading">Загрузка…</p>
+  const pageItems = list.items
   const dictionaryEmpty = hasWords === false
   return (
     <div>
@@ -147,7 +132,14 @@ export default function Page() {
       </header>
       <label className="search">
         <Search size={18} />
-        <input value={query} placeholder="Слово" onChange={(event) => setQuery(event.target.value)} />
+          <input
+            value={query}
+            placeholder="Слово"
+            onChange={(event) => {
+              setPage(1)
+              setQuery(event.target.value)
+            }}
+          />
       </label>
       {studyOpen ? (
         <div className="pad stack">
@@ -156,7 +148,10 @@ export default function Page() {
               <button
                 key={id}
                 className={packs.includes(id) ? 'chip on' : 'chip'}
-                onClick={() => setPacks((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])}
+                onClick={() => {
+                  setPage(1)
+                  setPacks((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
+                }}
               >
                 {label}
               </button>
@@ -188,7 +183,14 @@ export default function Page() {
       {filterOpen ? (
         <div className={`${styles.popover} ${styles.panel}`}>
           {STATUSES.map(([id, label]) => (
-            <button key={id} className={status === id ? 'chip on' : 'chip'} onClick={() => setStatus(id)}>
+            <button
+              key={id}
+              className={status === id ? 'chip on' : 'chip'}
+              onClick={() => {
+                setPage(1)
+                setStatus(id)
+              }}
+            >
               {label}
             </button>
           ))}
@@ -228,12 +230,7 @@ export default function Page() {
               </Link>
             ))}
           </div>
-          <Pager
-            className={styles.pager}
-            page={page + 1}
-            pages={items?.length ? Math.ceil(items.length / 30) : 0}
-            onPage={(next) => setPage(next - 1)}
-          />
+          <Pager className={styles.pager} page={list.page} pages={list.pages} onPage={setPage} />
         </ul>
       )}
       {pageItems.length > 0 ? (

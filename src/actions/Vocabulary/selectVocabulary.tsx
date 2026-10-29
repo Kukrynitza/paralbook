@@ -2,9 +2,11 @@
 
 import database from '@/modules/database'
 import userId from '@/sorse/userId'
-import { vocabById, vocabTone } from '@/sorse/query'
-import { LEVELS, type VocabItem } from '@/sorse/types'
+import { pageWindow, vocabTone } from '@/sorse/query'
+import { LEVELS, type PageResult, type VocabItem } from '@/sorse/types'
 import { sql, type SqlBool } from 'kysely'
+
+const PAGE = 30
 
 const BANDS: Record<string, [number, number]> = {
   r100: [1, 100],
@@ -12,7 +14,12 @@ const BANDS: Record<string, [number, number]> = {
   r3000: [1001, 3000],
 }
 
-export default async function selectVocabulary(query: string, status: string, packs: string[] = []): Promise<{ items: VocabItem[] }> {
+export default async function selectVocabulary(
+  query: string,
+  status: string,
+  packs: string[] = [],
+  page = 1,
+): Promise<PageResult<VocabItem> & { hasWords: boolean }> {
   const id = await userId()
   if (!id) {
     throw new Error('Нужно войти')
@@ -67,11 +74,20 @@ export default async function selectVocabulary(query: string, status: string, pa
   if (status === 'error') {
     rowsQuery = rowsQuery.where('userWords.wrong', '>', 0).whereRef('userWords.wrong', '>=', 'userWords.correct')
   }
+  const counted = await rowsQuery.clearSelect().select(sql<number>`count(*)::int`.as('total')).executeTakeFirst()
+  const window = pageWindow(Number(counted?.total ?? 0), page, PAGE)
   const ordered = status === 'sum'
     ? rowsQuery.orderBy(sql`user_words.correct + user_words.wrong`, 'desc').orderBy('userWords.lemma', 'asc')
     : rowsQuery.orderBy('userWords.lemma', 'asc')
-  const rows = await ordered.execute()
+  const rows = await ordered.limit(PAGE).offset(window.offset).execute()
+  const any = window.total > 0
+    ? true
+    : Boolean(await database.selectFrom('userWords').select('id').where('userId', '=', id).limit(1).executeTakeFirst())
   return {
+    page: window.page,
+    pages: window.pages,
+    total: window.total,
+    hasWords: any,
     items: rows.map((row) => ({
       id: row.id,
       lemma: row.lemma,
