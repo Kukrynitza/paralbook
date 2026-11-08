@@ -146,6 +146,14 @@ export interface ChatMessages {
   createdAt: GeneratedAlways<Date>
 }
 
+export interface LlmSettings {
+  userId: string
+  baseUrl: string
+  model: string
+  apiKeyCiphertext: string | null
+  updatedAt: Generated<Date>
+}
+
 export interface Database {
   profiles: Profiles
   texts: Texts
@@ -162,6 +170,7 @@ export interface Database {
   activityDays: ActivityDays
   friendships: Friendships
   chatMessages: ChatMessages
+  llmSettings: LlmSettings
 }
 
 const connectionString = process.env.DATABASE_CONNECTION_STRING

@@ -16,6 +16,29 @@ export interface User {
   streak: number
 }
 
+export interface LlmSettingsView {
+  baseUrl: string | null
+  model: string | null
+  hasKey: boolean
+  keyHint: string | null
+  source: 'user' | 'env' | 'none'
+  envModel: string | null
+  tableReady: boolean
+}
+
+export interface LlmTestResult {
+  ok: boolean
+  text: string
+  latencyMs?: number
+  model?: string
+}
+
+export interface LlmModelsResult {
+  ok: boolean
+  text?: string
+  models: string[]
+}
+
 export interface Friend {
   id: string
   name: string

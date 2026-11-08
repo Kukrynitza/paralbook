@@ -45,3 +45,21 @@
   background: white;
   display: block;
 }
+
+.ok {
+  color: var(--ok);
+}
+
+.bad {
+  color: var(--danger);
+}
+
+.llmActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.llmActions .btn {
+  flex: 1;
+}

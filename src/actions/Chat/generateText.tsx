@@ -1,7 +1,8 @@
 'use server'
 
 import database from '@/modules/database'
-import { chatText, modelReady, readObject } from '@/sorse/llm'
+import { chatText, llmErrorMessage, readObject, type LlmConfig } from '@/sorse/llm'
+import { resolveLlmConfig } from '@/sorse/llmSettings'
 import { preview } from '@/sorse/preview'
 import { persistText, rewritePages, wordCount } from '@/sorse/textBook'
 import { LEVELS, type Cefr } from '@/sorse/types'
@@ -25,7 +26,7 @@ function repeats(previous: string, piece: string) {
   return Boolean(sample) && previous.replace(/\s+/g, ' ').toLowerCase().includes(sample)
 }
 
-async function nextPiece(topic: string, level: Cefr, need: number, english: string, strict: boolean, interests: string[]) {
+async function nextPiece(topic: string, level: Cefr, need: number, english: string, strict: boolean, interests: string[], config: LlmConfig) {
   const note = interestNote(interests)
   const system = english
     ? `${strict ? 'Предыдущий ответ повторил уже написанное. Напиши только следующие предложения того же текста, которых ещё нет.' : 'Продолжи тот же учебный текст следующим абзацем. Не повторяй уже написанное и не начинай новую историю.'} Верни только JSON {"english","russian"} — только новый кусок, около addWords слов, уровень CEFR не выше заданного.${note}`
@@ -33,7 +34,7 @@ async function nextPiece(topic: string, level: Cefr, need: number, english: stri
   const payload = english
     ? { level, addWords: need, english: english.slice(-900) }
     : { topic, words: need, level }
-  const raw = await chatText(system, JSON.stringify(payload))
+  const raw = await chatText(system, JSON.stringify(payload), config)
   const parsed = readObject(raw)
   if (!parsed) return { english: '', russian: '', title: '' }
   return {
@@ -71,9 +72,13 @@ export default async function generateText(input: GenerateInput) {
     .orderBy('createdAt', 'desc')
     .limit(1)
     .executeTakeFirst()
-  if (!modelReady()) {
-    await fail(id, topic, minutes, level, last?.role, 'Модель не настроена. Повторите, когда она будет доступна.')
+  const llm = await resolveLlmConfig(id)
+  if (!llm.config) {
+    await fail(id, topic, minutes, level, last?.role, 'Модель не настроена. Укажите API-ключ в настройках.')
+    return
   }
+  const config = llm.config
+  const startedAt = Date.now()
   const target = minutes * 90
   let english = ''
   let russian = ''
@@ -81,12 +86,13 @@ export default async function generateText(input: GenerateInput) {
   let textId: string | null = null
   try {
     for (let step = 0; step < 20; step += 1) {
+      if (Date.now() - startedAt > 4 * 60 * 1000) break
       const have = wordCount(english)
       if (have >= Math.floor(target * 0.85)) break
       const need = Math.min(350, Math.max(40, target - have))
-      let piece = await nextPiece(topic, level, need, english, false, profile?.interests ?? [])
+      let piece = await nextPiece(topic, level, need, english, false, profile?.interests ?? [], config)
       if (piece.english && repeats(english, piece.english)) {
-        const retry = await nextPiece(topic, level, need, english, true, profile?.interests ?? [])
+        const retry = await nextPiece(topic, level, need, english, true, profile?.interests ?? [], config)
         piece = {
           english: retry.english || piece.english,
           russian: retry.russian || piece.russian,
@@ -135,9 +141,9 @@ export default async function generateText(input: GenerateInput) {
       }
       if (wordCount(english) <= before + 20) break
     }
-  } catch {
+  } catch (reason) {
     if (!textId) {
-      await fail(id, topic, minutes, level, last?.role, 'Модель не ответила. Повторите ещё раз.')
+      await fail(id, topic, minutes, level, last?.role, llmErrorMessage(reason))
     }
   }
   if (!textId) {
