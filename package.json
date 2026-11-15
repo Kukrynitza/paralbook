@@ -8,6 +8,7 @@
     "start": "next start --port 5173"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "jose": "^6.2.13",
     "kysely": "^0.29.7",
     "lucide-react": "^1.61.0",

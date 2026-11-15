@@ -3,6 +3,7 @@
 import database from '@/modules/database'
 import { persistText, wordCount } from '@/sorse/textBook'
 import { LEVELS, type Cefr } from '@/sorse/types'
+import { MAX_UPLOAD_TEXT, MIN_UPLOAD_TEXT } from '@/sorse/uploadLimits'
 import userId from '@/sorse/userId'
 
 interface UploadInput {
@@ -16,8 +17,8 @@ export default async function uploadText(input: UploadInput) {
   const id = await userId()
   if (!id) throw new Error('Нужно войти')
   const body = input.body.replace(/\uFFFD/g, '').trim()
-  if (body.length < 20) throw new Error('Текст слишком короткий')
-  if (body.length > 2_000_000) throw new Error('Текст слишком длинный')
+  if (body.length < MIN_UPLOAD_TEXT) throw new Error('Текст слишком короткий')
+  if (body.length > MAX_UPLOAD_TEXT) throw new Error('Текст слишком длинный')
   const title = input.title.trim().slice(0, 80) || 'Свой текст'
   const topic = input.topic.trim().slice(0, 120) || title
   const level = LEVELS.includes(input.level) ? input.level : 'B1'
