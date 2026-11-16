@@ -1,0 +1,10 @@
+.counter {
+  align-self: flex-end;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 15px;
+}
+
+.bad {
+  color: var(--danger);
+}

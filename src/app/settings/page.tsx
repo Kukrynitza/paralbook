@@ -1,19 +1,16 @@
 'use client'
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Eye, EyeOff } from 'lucide-react'
+import { ArrowLeft, Eye, EyeOff, Info, X } from 'lucide-react'
 import { minLength, pipe, safeParse, string } from 'valibot'
-import clearLlmSettings from '@/actions/Llm/clearLlmSettings'
-import listLlmModels from '@/actions/Llm/listLlmModels'
-import saveLlmSettings from '@/actions/Llm/saveLlmSettings'
-import selectLlmSettings from '@/actions/Llm/selectLlmSettings'
-import testLlmSettings from '@/actions/Llm/testLlmSettings'
+import llmAccess from '@/actions/Llm/access'
 import changePasswordAction from '@/actions/Profile/changePassword'
+import systemInfo from '@/actions/Profile/systemInfo'
 import updateMe from '@/actions/Profile/updateMe'
 import seedVocabulary from '@/actions/Vocabulary/seedVocabulary'
-import { GOALS, INTERESTS, LEVELS, type Cefr, type LlmSettingsView, type ThemePref, type User } from '@/sorse/types'
+import { GOALS, INTERESTS, LEVELS, type Cefr, type LlmSettingsView, type SystemInfo, type ThemePref, type User } from '@/sorse/types'
 import { useAuth, useUi } from '@/contexts/AuthContext'
 import { markSeedAsked } from '@/sorse/prefs'
 import styles from './page.module.css'
@@ -37,6 +34,34 @@ function providerFor(baseUrl: string) {
   return LLM_PRESETS.find((item) => item.baseUrl && item.baseUrl === baseUrl)?.id ?? 'custom'
 }
 
+function Row({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className={styles.row}>
+      <span>{label}</span>
+      <b>{value}</b>
+    </div>
+  )
+}
+
+async function llmRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const access = await llmAccess()
+  const response = await fetch(`${access.url}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${access.token}`,
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init.headers || {}),
+    },
+    cache: 'no-store',
+  })
+  const text = await response.text()
+  const data = text ? JSON.parse(text) : null
+  if (!response.ok) {
+    throw new Error(data && typeof data === 'object' && 'detail' in data ? String(data.detail) : 'Сервис модели ответил ошибкой')
+  }
+  return data as T
+}
+
 export default function Page() {
   const { user, setUser, logout } = useAuth()
   const { confirm, notify } = useUi()
@@ -56,12 +81,15 @@ export default function Page() {
   const [llmBusy, setLlmBusy] = useState<'save' | 'test' | 'models' | 'clear' | null>(null)
   const [llmCheck, setLlmCheck] = useState<{ ok: boolean; text: string } | null>(null)
   const [llmModels, setLlmModels] = useState<string[]>([])
+  const [info, setInfo] = useState<SystemInfo | null>(null)
+  const [infoOpen, setInfoOpen] = useState(false)
+  const [infoLoading, setInfoLoading] = useState(false)
   const llmUserId = user?.id
 
   useEffect(() => {
     if (!llmUserId) return
     let active = true
-    selectLlmSettings()
+    llmRequest<LlmSettingsView>('/v1/llm/settings')
       .then((next) => {
         if (!active) return
         setLlmSettings(next)
@@ -171,7 +199,7 @@ export default function Page() {
   }
 
   async function reloadLlm() {
-    const next = await selectLlmSettings()
+    const next = await llmRequest<LlmSettingsView>('/v1/llm/settings')
     setLlmSettings(next)
     if (next.baseUrl) {
       setLlmBaseUrl(next.baseUrl)
@@ -185,12 +213,11 @@ export default function Page() {
     setLlmBusy('save')
     setLlmCheck(null)
     try {
-      const problem = await saveLlmSettings({ baseUrl: llmBaseUrl, model: llmModel, apiKey: llmKey })
-      if (problem) {
-        notify(problem)
-        return
-      }
-      await reloadLlm()
+      const next = await llmRequest<LlmSettingsView>('/v1/llm/settings', {
+        method: 'POST',
+        body: JSON.stringify({ baseUrl: llmBaseUrl, model: llmModel, apiKey: llmKey }),
+      })
+      setLlmSettings(next)
       setLlmKey('')
       notify('Настройки нейросети сохранены')
     } catch (reason) {
@@ -204,8 +231,14 @@ export default function Page() {
     setLlmBusy('test')
     setLlmCheck(null)
     try {
-      const result = await testLlmSettings({ baseUrl: llmBaseUrl, model: llmModel, apiKey: llmKey })
-      setLlmCheck({ ok: result.ok, text: result.text })
+      const result = await llmRequest<{ ok: boolean; text?: string; latencyMs?: number }>('/v1/llm/test', {
+        method: 'POST',
+        body: JSON.stringify({ baseUrl: llmBaseUrl, model: llmModel, apiKey: llmKey }),
+      })
+      setLlmCheck({
+        ok: result.ok,
+        text: result.text || (result.ok ? `Подключение работает${result.latencyMs ? `, ${result.latencyMs} мс` : ''}` : 'Не удалось проверить подключение'),
+      })
     } catch (reason) {
       setLlmCheck({ ok: false, text: reason instanceof Error ? reason.message : 'Не удалось проверить подключение' })
     } finally {
@@ -216,13 +249,12 @@ export default function Page() {
   async function loadLlmModels() {
     setLlmBusy('models')
     try {
-      const result = await listLlmModels({ baseUrl: llmBaseUrl, apiKey: llmKey })
+      const result = await llmRequest<{ ok: boolean; models: string[]; text?: string }>('/v1/llm/models', {
+        method: 'POST',
+        body: JSON.stringify({ baseUrl: llmBaseUrl, apiKey: llmKey }),
+      })
       setLlmModels(result.models)
-      if (result.ok) {
-        notify(result.text ?? 'Список моделей загружен')
-      } else {
-        notify(result.text ?? 'Не удалось загрузить модели')
-      }
+      notify(result.text ?? (result.ok ? 'Список моделей загружен' : 'Не удалось загрузить модели'))
     } catch (reason) {
       notify(reason instanceof Error ? reason.message : 'Не удалось загрузить модели')
     } finally {
@@ -241,16 +273,41 @@ export default function Page() {
     return 'Не настроено'
   }
 
+  async function openInfo() {
+    setInfoOpen(true)
+    if (info || infoLoading) return
+    setInfoLoading(true)
+    try {
+      setInfo(await systemInfo())
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось получить сведения')
+    } finally {
+      setInfoLoading(false)
+    }
+  }
+
+  function copyInfo() {
+    if (!info) return
+    const lines = [
+      `Paralbook ${info.app.version}`,
+      `Next.js ${info.app.next} · Node ${info.app.node} · ${info.app.env}`,
+      `Сервис: ${info.service.url} — ${info.service.ok ? `доступен, ${info.service.latencyMs} мс, версия ${info.service.version ?? '—'}` : 'недоступен'}`,
+      `Модель: ${llmSettings?.model ?? 'не настроена'}`,
+      `Данные: текстов ${info.data.texts}, слов ${info.data.words}, освоено ${info.data.mastered}, прочитано ${info.data.read}`,
+      `Словарь: лемм ${info.data.lemmas}`,
+    ]
+    void navigator.clipboard.writeText(lines.join('\n')).then(
+      () => notify('Сведения скопированы'),
+      () => notify('Не удалось скопировать'),
+    )
+  }
+
   async function removeLlm() {
     const ok = await confirm('Удалить личные настройки нейросети? Если задан общий ключ сервера, будет использоваться он.')
     if (!ok) return
     setLlmBusy('clear')
     try {
-      const problem = await clearLlmSettings()
-      if (problem) {
-        notify(problem)
-        return
-      }
+      await llmRequest('/v1/llm/settings', { method: 'DELETE' })
       setLlmBaseUrl('')
       setLlmModel('')
       setLlmKey('')
@@ -273,6 +330,9 @@ export default function Page() {
           <ArrowLeft size={22} />
         </button>
         <h1>Настройки аккаунта</h1>
+        <button className="icon-btn" aria-label="Справка о системе" onClick={() => void openInfo()}>
+          <Info size={20} />
+        </button>
       </header>
       <div className="pad stack">
         <div>
@@ -468,6 +528,88 @@ export default function Page() {
               </button>
               <button className="btn" onClick={loadOfferedWords}>
                 Загрузить
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {infoOpen ? (
+        <div className="modal-dim" onClick={() => setInfoOpen(false)}>
+          <div
+            className={`modal ${styles.info}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Справка о системе"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.infoHead}>
+              <h2>Справка о системе</h2>
+              <button className="icon-btn" aria-label="Закрыть" onClick={() => setInfoOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            {infoLoading ? (
+              <p className="muted">Собираю сведения…</p>
+            ) : info ? (
+              <div className={styles.infoBody}>
+                <section>
+                  <h3>Приложение</h3>
+                  <Row label="Версия" value={info.app.version} />
+                  <Row label="Next.js" value={info.app.next} />
+                  <Row label="Node.js" value={info.app.node} />
+                  <Row label="Режим" value={info.app.env} />
+                </section>
+                <section>
+                  <h3>Сервис текстов</h3>
+                  <Row label="Адрес" value={<span className={styles.mono}>{info.service.url}</span>} />
+                  <Row label="Статус" value={info.service.ok ? `Доступен · ${info.service.latencyMs} мс` : 'Недоступен'} />
+                  <Row label="Версия" value={info.service.version ?? '—'} />
+                  <Row
+                    label="Словарь"
+                    value={info.service.lemmas ? `${info.service.lemmas.toLocaleString('ru-RU')} лемм` : '—'}
+                  />
+                </section>
+                <section>
+                  <h3>Нейросеть</h3>
+                  <Row label="Модель" value={llmSettings?.model || '—'} />
+                  <Row label="Ключ" value={llmStatus()} />
+                </section>
+                <section>
+                  <h3>Ваши данные</h3>
+                  <Row label="Уровень" value={user.cefr} />
+                  <Row label="Серия" value={`${user.streak} дн.`} />
+                  <Row label="Слов в словаре" value={info.data.words.toLocaleString('ru-RU')} />
+                  <Row label="Освоено" value={info.data.mastered.toLocaleString('ru-RU')} />
+                  <Row label="Текстов в подборке" value={info.data.texts.toLocaleString('ru-RU')} />
+                  <Row label="Прочитано" value={info.data.read.toLocaleString('ru-RU')} />
+                </section>
+                <section>
+                  <h3>Возможности</h3>
+                  <Row label="Форматы" value="TXT, FB2, EPUB, DOCX, MD, .2books" />
+                  <Row
+                    label="Файл"
+                    value={info.limits ? `до ${Math.round(info.limits.maxUploadBytes / 1024 / 1024)} МБ` : '—'}
+                  />
+                  <Row
+                    label="Текст"
+                    value={info.limits ? `до ${Math.round(info.limits.maxTranslateChars / 1000)} тыс. символов` : '—'}
+                  />
+                  <Row label="Скорость чтения" value="75 слов/мин" />
+                </section>
+                <p className="small muted" style={{ margin: 0 }}>
+                  Подборка — ваши тексты. Библиотека — опубликованные тексты, видимые другим. Словарь хранит слова и
+                  примеры из текста, тренировка повторяет их по расписанию.
+                </p>
+              </div>
+            ) : (
+              <p className="muted">Не удалось получить сведения.</p>
+            )}
+            <div className="actions">
+              <button className="btn ghost" onClick={copyInfo} disabled={!info}>
+                Скопировать сведения
+              </button>
+              <button className="btn" onClick={() => setInfoOpen(false)}>
+                Закрыть
               </button>
             </div>
           </div>

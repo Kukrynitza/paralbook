@@ -1,6 +1,7 @@
 import { sql, type Kysely, type Transaction } from 'kysely'
 import type { Database } from '@/modules/database'
 import { shortHint } from '@/sorse/hint'
+import { CONTEXT_MAX } from '@/sorse/context'
 import type { Friend, SessionCard, VocabItem } from '@/sorse/types'
 
 type Db = Kysely<Database> | Transaction<Database>
@@ -123,7 +124,7 @@ export function vocabTone(correct: number, wrong: number): VocabItem['tone'] {
   return correct > wrong ? 'ok' : 'error'
 }
 
-export async function ensureWord(db: Db, userId: string, lemma: string, countToday: boolean) {
+export async function ensureWord(db: Db, userId: string, lemma: string, countToday: boolean, context?: string | null) {
   const known = await db
     .selectFrom('lemmas')
     .select(['lemma', 'hint'])
@@ -146,6 +147,7 @@ export async function ensureWord(db: Db, userId: string, lemma: string, countTod
       correct: 0,
       wrong: 0,
       mastered: false,
+      contextEn: context ? context.slice(0, CONTEXT_MAX) : null,
       dueAt: sql`now()`,
       intervalDays: 0,
       ease: 2.5,
@@ -167,6 +169,7 @@ export async function vocabById(db: Db, userId: string, itemId: string): Promise
       'userWords.correct',
       'userWords.wrong',
       'userWords.mastered',
+      'userWords.contextEn',
       'lemmas.ipa',
       'lemmas.translation',
       'lemmas.example',
@@ -181,7 +184,7 @@ export async function vocabById(db: Db, userId: string, itemId: string): Promise
     ipa: row.ipa,
     translation: row.translation,
     example: row.example,
-    contextEn: null,
+    contextEn: row.contextEn,
     memory: null,
     hint: row.hint,
     correct: row.correct,
@@ -207,7 +210,7 @@ export async function cardOf(db: Db, userId: string, lemma: string): Promise<Ses
   if (!known) return null
   const word = await db
     .selectFrom('userWords')
-    .select(['hint', 'correct'])
+    .select(['hint', 'correct', 'contextEn'])
     .where('userId', '=', userId)
     .where('lemma', '=', lemma)
     .executeTakeFirst()
@@ -234,6 +237,7 @@ export async function cardOf(db: Db, userId: string, lemma: string): Promise<Ses
     example: known.example,
     hint: word?.hint || known.hint,
     note: null,
+    context: word?.contextEn ?? null,
     pos: sense?.pos ?? null,
     level: known.level,
     band: bandOf(known.rank),

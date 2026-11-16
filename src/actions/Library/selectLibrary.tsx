@@ -14,7 +14,11 @@ export default async function selectLibrary(query: string, sort: string, page: n
     throw new Error('Нужно войти')
   }
   const needle = query.trim().replace(/[%_\\]/g, '')
-  let countQuery = database.selectFrom('texts').select(sql<number>`count(*)::int`.as('total')).where('published', '=', true)
+  let countQuery = database
+    .selectFrom('texts')
+    .select(sql<number>`count(*)::int`.as('total'))
+    .where('published', '=', true)
+    .where('ready', '=', true)
   let rowsQuery = database
     .selectFrom('texts')
     .select([
@@ -28,6 +32,7 @@ export default async function selectLibrary(query: string, sort: string, page: n
       sql<number | null>`(select avg(score)::float8 from votes where text_id = texts.id)`.as('rating'),
     ])
     .where('published', '=', true)
+    .where('ready', '=', true)
   if (needle) {
     const pattern = `%${needle}%`
     const match = sql<boolean>`(title ilike ${pattern} or topic ilike ${pattern} or excerpt ilike ${pattern} or level::text ilike ${pattern})`

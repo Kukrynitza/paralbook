@@ -8,7 +8,6 @@
     "start": "next start --port 5173"
   },
   "dependencies": {
-    "fflate": "^0.8.3",
     "jose": "^6.2.13",
     "kysely": "^0.29.7",
     "lucide-react": "^1.61.0",
@@ -24,5 +23,15 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "typescript": "~5.9.3"
-  }
+  },
+  "description": "Чтение английских текстов: подборка, библиотека, генерация в чате, карточка слова по второму клику, словарь и тренировка.",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "D:\\\\git\\\\bsuir-git-tasks\\\\course-4\\\\paralbook"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
 }

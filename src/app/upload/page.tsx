@@ -1,202 +1,119 @@
 'use client'
 
 import { useState, type FormEvent } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import uploadText from '@/actions/Reading/uploadText'
-import appendTwoBooksPages from '@/actions/Reading/appendTwoBooksPages'
-import deleteText from '@/actions/Reading/deleteText'
-import finishTwoBooksImport from '@/actions/Reading/finishTwoBooksImport'
-import startTwoBooksImport from '@/actions/Reading/startTwoBooksImport'
-import { parseBook } from '@/sorse/book'
-import {
-  decodeTwoBooksPage,
-  openTwoBooks,
-  readTwoBooksMeta,
-  type TwoBooksMeta,
-  type TwoBooksPage,
-} from '@/sorse/book/twoBooks'
+import cancelImport from '@/actions/Reading/cancelImport'
+import startImport from '@/actions/Reading/startImport'
 import { LEVELS, type Cefr } from '@/sorse/types'
-import {
-  MAX_TWO_BOOKS_BYTES,
-  MAX_TWO_BOOKS_PAGES,
-  MAX_TWO_BOOKS_TOKENS,
-  MAX_UPLOAD_BYTES,
-  MAX_UPLOAD_TEXT,
-  TWO_BOOKS_BATCH_PAGES,
-  TWO_BOOKS_BATCH_TOKENS,
-} from '@/sorse/uploadLimits'
 import { useAuth, useUi } from '@/contexts/AuthContext'
+import { useJobs } from '@/contexts/JobContext'
+import BusyNotice from '@/components/BusyNotice/BusyNotice'
 
-const ACCEPT = [
-  '.txt',
-  '.text',
-  '.md',
-  '.markdown',
-  '.fb2',
-  '.epub',
-  '.docx',
-  '.2books',
-  'text/plain',
-  'text/markdown',
-  'application/epub+zip',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-].join(',')
+const ACCEPT = '.txt,.text,.md,.markdown,.fb2,.epub,.docx,.2books'
 
-const MAX_MB = Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)
-const TWO_BOOKS_MB = Math.round(MAX_TWO_BOOKS_BYTES / 1024 / 1024)
+const LANGUAGES = [
+  ['auto', 'Определить автоматически'],
+  ['en', 'Английский'],
+  ['ru', 'Русский'],
+] as const
 
-function isTwoBooks(file: File) {
-  return file.name.toLowerCase().endsWith('.2books')
+type Language = (typeof LANGUAGES)[number][0]
+
+interface ImportLimits {
+  maxUploadBytes: number
+  maxUploadText: number
+  maxTranslateChars: number
+}
+
+interface StartedJob {
+  id: string
+  status: string
+  textId: string | null
+}
+
+function detailFrom(value: unknown, fallback: string) {
+  if (value && typeof value === 'object' && 'detail' in value) return String((value as { detail: unknown }).detail)
+  return fallback
+}
+
+function uploadFile(url: string, token: string, file: File, language: Language, onProgress: (value: number) => void) {
+  return new Promise<StartedJob>((resolve, reject) => {
+    const data = new FormData()
+    data.append('file', file)
+    data.append('translate', 'true')
+    data.append('source', 'upload')
+    data.append('language', language)
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url)
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100))
+    }
+    xhr.onerror = () => reject(new Error('Не удалось отправить файл'))
+    xhr.onload = () => {
+      let value: unknown = null
+      try {
+        value = JSON.parse(xhr.responseText)
+      } catch {
+        value = null
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(value as StartedJob)
+      else reject(new Error(detailFrom(value, 'Не удалось начать обработку')))
+    }
+    xhr.send(data)
+  })
 }
 
 export default function Page() {
   const { user } = useAuth()
   const { notify } = useUi()
+  const { trackJob, trackUpload, updateUpload, removeJob, requestNotifications, busyJob } = useJobs()
   const router = useRouter()
   const [title, setTitle] = useState('')
   const [topic, setTopic] = useState('')
   const [level, setLevel] = useState<Cefr>(user?.cefr ?? 'B1')
-  const [body, setBody] = useState('')
+  const [language, setLanguage] = useState<Language>('auto')
+  const [file, setFile] = useState<File | null>(null)
   const [pending, setPending] = useState(false)
-  const [parsing, setParsing] = useState(false)
-  const [fileName, setFileName] = useState('')
-  const [twoBooks, setTwoBooks] = useState<File | null>(null)
-  const [twoBooksMeta, setTwoBooksMeta] = useState<TwoBooksMeta | null>(null)
-  const [importing, setImporting] = useState(false)
-  const [imported, setImported] = useState(0)
-  const [importTotal, setImportTotal] = useState(0)
-
-  async function pickFile(file: File) {
-    setParsing(true)
-    setFileName(file.name)
-    try {
-      if (isTwoBooks(file)) {
-        if (file.size > MAX_TWO_BOOKS_BYTES) {
-          throw new Error(`Файл .2books больше ${TWO_BOOKS_MB} МБ`)
-        }
-        const bytes = new Uint8Array(await file.arrayBuffer())
-        const meta = readTwoBooksMeta(bytes)
-        if (meta.isMonolingual) throw new Error('В книге нет параллельного перевода')
-        if (meta.mainLang !== 'EN' || meta.secondaryLang !== 'RU') {
-          throw new Error('Поддерживаются только книги с парой EN → RU')
-        }
-        if (meta.pages > MAX_TWO_BOOKS_PAGES) {
-          throw new Error(`В книге слишком много страниц. Максимум — ${MAX_TWO_BOOKS_PAGES}.`)
-        }
-        setTwoBooks(file)
-        setTwoBooksMeta(meta)
-        setBody('')
-        if (!title.trim()) setTitle(meta.title || file.name.replace(/\.2books$/i, ''))
-      } else {
-        setTwoBooks(null)
-        setTwoBooksMeta(null)
-        const book = await parseBook(file)
-        setBody(book.text)
-        if (!title.trim()) setTitle(book.title)
-        if (book.warnings.length) notify(book.warnings[0])
-      }
-    } catch (reason) {
-      setTwoBooks(null)
-      setTwoBooksMeta(null)
-      notify(reason instanceof Error ? reason.message : 'Не удалось разобрать файл')
-    } finally {
-      setParsing(false)
-    }
-  }
-
-  async function importTwoBooks(file: File, meta: TwoBooksMeta) {
-    setPending(true)
-    setImporting(true)
-    setImported(0)
-    setImportTotal(meta.pages)
-    let textId: string | null = null
-    try {
-      if (file.size > MAX_TWO_BOOKS_BYTES) {
-        throw new Error(`Файл .2books больше ${TWO_BOOKS_MB} МБ`)
-      }
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      const bytes = new Uint8Array(await file.arrayBuffer())
-      const book = openTwoBooks(bytes)
-      setImportTotal(book.pages.length)
-      const bookTitle = title.trim() || book.meta.title || file.name.replace(/\.2books$/i, '') || 'Своя книга'
-      const bookTopic = topic.trim() || bookTitle
-      const created = await startTwoBooksImport({
-        title: bookTitle,
-        topic: bookTopic,
-        level,
-        pages: book.pages.length,
-        excerpt: book.meta.description || bookTitle,
-      })
-      textId = created
-      let offset = 0
-      let words = 0
-      let chars = 0
-      let totalTokens = 0
-      let batch: TwoBooksPage[] = []
-      let batchTokens = 0
-      const flush = async () => {
-        if (!batch.length) return
-        await appendTwoBooksPages(created, offset, batch)
-        offset += batch.length
-        setImported(offset)
-        batch = []
-        batchTokens = 0
-      }
-      for (const pageFile of book.pages) {
-        const page = decodeTwoBooksPage(pageFile.data, pageFile.position)
-        const pageTokens = page.en.length + page.ru.length
-        totalTokens += pageTokens
-        if (totalTokens > MAX_TWO_BOOKS_TOKENS) throw new Error('В книге слишком много токенов')
-        chars += page.en.reduce((sum, token) => sum + token.text.length, 0)
-        if (chars > MAX_UPLOAD_TEXT) throw new Error('Английский текст книги слишком длинный')
-        if (
-          batch.length &&
-          (batch.length >= TWO_BOOKS_BATCH_PAGES || batchTokens + pageTokens > TWO_BOOKS_BATCH_TOKENS)
-        ) {
-          await flush()
-        }
-        batch.push(page)
-        batchTokens += pageTokens
-        words += page.en.reduce((sum, token) => sum + (token.text.trim() ? 1 : 0), 0)
-      }
-      await flush()
-      await finishTwoBooksImport(created, words)
-      textId = null
-      notify('Книга импортирована')
-      router.push(`/read/${created}`)
-    } catch (reason) {
-      if (textId) {
-        try {
-          await deleteText(textId)
-        } catch {
-          // частичная книга могла уже удалиться
-        }
-      }
-      notify(reason instanceof Error ? reason.message : 'Не удалось импортировать книгу')
-    } finally {
-      setPending(false)
-      setImporting(false)
-    }
-  }
+  const [limits, setLimits] = useState<ImportLimits | null>(null)
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    if (twoBooks && twoBooksMeta) {
-      await importTwoBooks(twoBooks, twoBooksMeta)
+    if (!file) {
+      notify('Выберите файл книги')
       return
     }
     setPending(true)
+    let textId: string | null = null
+    const bookTitle = title.trim() || file.name.replace(/\.[^.]+$/, '') || 'Книга'
     try {
-      const id = await uploadText({ title, topic, level, body })
-      notify('Текст загружен')
-      router.push(`/read/${id}`)
+      void requestNotifications()
+      const start = await startImport({ title: bookTitle, topic, level })
+      textId = start.textId
+      setLimits(start.limits)
+      trackUpload({ textId: start.textId, title: bookTitle })
+      const job = await uploadFile(`${start.serviceUrl}/v1/jobs/import/file`, start.token, file, language, (progress) => {
+        updateUpload(start.textId, progress, 'uploading')
+      })
+      trackJob({ id: job.id, textId: start.textId, title: bookTitle, type: 'import' })
+      notify('Файл загружен. Обработка продолжится в фоне')
+      router.push('/')
     } catch (reason) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось загрузить')
+      if (textId) {
+        removeJob(`local-${textId}`)
+        await cancelImport(textId)
+      }
+      notify(reason instanceof Error ? reason.message : 'Не удалось загрузить текст')
       setPending(false)
     }
   }
 
-  const busy = pending || parsing || importing
+  if (busyJob) return <BusyNotice title="Загрузка" />
+
+  const busy = pending
+  const maxMb = limits ? Math.round(limits.maxUploadBytes / 1024 / 1024) : null
+  const translateK = limits ? Math.round(limits.maxTranslateChars / 1000) : null
 
   return (
     <div>
@@ -220,47 +137,49 @@ export default function Page() {
             ))}
           </select>
         </label>
-        {twoBooksMeta ? (
-          <div className="card pad stack">
-            <b>{twoBooksMeta.title || 'Книга'}</b>
-            {twoBooksMeta.author ? <span className="muted">{twoBooksMeta.author}</span> : null}
-            <span className="muted">
-              {twoBooksMeta.pages ? `${twoBooksMeta.pages} стр.` : 'Книга'} · {twoBooksMeta.mainLang} → {twoBooksMeta.secondaryLang} · параллельный перевод найден
-            </span>
-          </div>
-        ) : (
-          <label className="field">
-            <span>Текст</span>
-            <textarea className="input" rows={10} value={body} onChange={(event) => setBody(event.target.value)} />
-          </label>
-        )}
         <label className="field">
-          <span>Или файл книги</span>
+          <span>Язык книги</span>
+          <select className="input" value={language} onChange={(event) => setLanguage(event.target.value as Language)}>
+            {LANGUAGES.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <span className="muted">
+            {language === 'ru' ? 'Русская книга будет переведена на английский' : 'Если книга на русском, она будет переведена на английский автоматически'}
+          </span>
+        </label>
+        <label className="field">
+          <span>Файл книги</span>
           <input
             type="file"
             accept={ACCEPT}
             disabled={busy}
             onChange={(event) => {
-              const file = event.target.files?.[0]
-              event.target.value = ''
-              if (file) void pickFile(file)
+              const next = event.target.files?.[0] ?? null
+              setFile(next)
+              if (next && !title) setTitle(next.name.replace(/\.[^.]+$/, ''))
             }}
           />
           <span className="muted">
-            {parsing
-              ? `Разбираю ${fileName}…`
-              : fileName || `FB2, EPUB, DOCX, Markdown, TXT — до ${MAX_MB} МБ; .2books — до ${TWO_BOOKS_MB} МБ`}
+            {file
+              ? file.name
+              : maxMb
+                ? `TXT, FB2, EPUB, DOCX, Markdown, .2books — до ${maxMb} МБ`
+                : 'TXT, FB2, EPUB, DOCX, Markdown, .2books'}
+            {translateK ? ` · автоперевод до ${translateK} тыс. символов` : ''}
           </span>
         </label>
+        <p className="small muted" style={{ margin: 0 }}>
+          Большие книги обрабатываются в фоне. После загрузки файла можно уйти — прогресс будет в правом нижнем углу.
+        </p>
         <button className="btn" disabled={busy} type="submit">
-          {importing
-            ? `Импортирую ${imported} / ${importTotal}…`
-            : pending
-              ? 'Сохраняю…'
-              : parsing
-                ? 'Разбираю файл…'
-                : 'Открыть в читалке'}
+          {pending ? 'Загружаю…' : 'Загрузить книгу'}
         </button>
+        <Link className="btn ghost slim" href="/text">
+          Добавить текст вручную
+        </Link>
       </form>
     </div>
   )

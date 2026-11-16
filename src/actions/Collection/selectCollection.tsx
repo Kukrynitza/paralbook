@@ -15,8 +15,10 @@ export default async function selectCollection(sort: string, page: number): Prom
   }
   const counted = await database
     .selectFrom('collectionItems')
+    .innerJoin('texts', 'texts.id', 'collectionItems.textId')
     .select(sql<number>`count(*)::int`.as('total'))
-    .where('userId', '=', id)
+    .where('collectionItems.userId', '=', id)
+    .where('texts.ready', '=', true)
     .executeTakeFirst()
   const window = pageWindow(Number(counted?.total ?? 0), page, PAGE)
   let rowsQuery = database
@@ -39,6 +41,7 @@ export default async function selectCollection(sort: string, page: number): Prom
       sql<number | null>`(select score from votes where text_id = collection_items.text_id and user_id = ${id})`.as('mine'),
     ])
     .where('collectionItems.userId', '=', id)
+    .where('texts.ready', '=', true)
     .orderBy('collectionItems.pinned', 'desc')
   if (sort === 'progress') rowsQuery = rowsQuery.orderBy('collectionItems.progress', 'desc')
   else if (sort === 'length') rowsQuery = rowsQuery.orderBy('texts.minutes', 'desc')

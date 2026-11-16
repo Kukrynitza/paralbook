@@ -8,7 +8,8 @@ import saveProgress from '@/actions/Reading/saveProgress'
 import selectText from '@/actions/Reading/selectText'
 import selectWord from '@/actions/Words/selectWord'
 import addVocabulary from '@/actions/Vocabulary/addVocabulary'
-import { type DictEntry, type ReadPayload } from '@/sorse/types'
+import { type DictEntry, type ReadPage, type ReadPayload } from '@/sorse/types'
+import { sentenceAt } from '@/sorse/context'
 import { useUi } from '@/contexts/AuthContext'
 import WordArticle from '@/components/WordArticle/WordArticle'
 import Pager from '@/components/Pager/Pager'
@@ -24,6 +25,7 @@ export default function Page() {
   const router = useRouter()
   const { notify } = useUi()
   const [data, setData] = useState<ReadPayload | null>(null)
+  const [cache, setCache] = useState<Record<number, ReadPage>>({})
   const [error, setError] = useState('')
   const [page, setPage] = useState(0)
   const [along, setAlong] = useState(0)
@@ -31,22 +33,42 @@ export default function Page() {
   const [pick, setPick] = useState<{ index: number; lemma: string; translation?: string; align?: number; phase: 'gloss' | 'popup' } | null>(null)
   const [entry, setEntry] = useState<DictEntry | null>(null)
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(false)
   const lineRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const slice = data ? wordTokens(data.ruTokens) : []
-  const wordCount = data ? wordTokens(data.tokens).length : 0
+  const current = cache[page]
+  const slice = current ? wordTokens(current.ruTokens) : []
+  const wordCount = current ? wordTokens(current.tokens).length : 0
   const hit = pick?.align === undefined || !slice.length
     ? undefined
     : Math.min(slice.length - 1, Math.floor((pick.align * slice.length) / Math.max(1, wordCount)))
 
+  function merge(value: ReadPayload) {
+    setCache((previous) => {
+      const next = { ...previous }
+      for (const item of value.pages) next[item.page] = item
+      return next
+    })
+    setData((previous) => previous
+      ? {
+          ...previous,
+          pageCount: value.pageCount,
+          progress: value.progress,
+          hasTranslation: value.hasTranslation,
+          pages: value.pages,
+        }
+      : value)
+  }
+
   useEffect(() => {
     let active = true
     setError('')
-    selectText(id)
+    setCache({})
+    selectText(id, undefined, 4)
       .then((value) => {
         if (!active) return
-        setData(value)
+        merge(value)
         setPage(value.page)
         setAlong(0)
         setFinished(false)
@@ -62,16 +84,31 @@ export default function Page() {
   async function go(next: number) {
     if (!data || loading) return
     const value = Math.max(0, next)
-    setLoading(true)
+    const cached = cache[value]
+    if (cached) {
+      setPage(value)
+      setAlong(0)
+      setPick(null)
+    } else {
+      setLoading(true)
+    }
     try {
       const result = await saveProgress(id, value)
       setFinished(result.finished)
-      if (!result.finished) {
-        const payload = await selectText(id, result.page)
-        setData(payload)
-        setPage(result.page)
-        setAlong(0)
+      if (result.finished) {
+        setPage(Math.min(value, data.pageCount - 1))
+        return
       }
+      const target = result.page
+      if (!cache[target]) {
+        const payload = await selectText(id, target, 4)
+        merge(payload)
+        setPage(payload.page)
+      } else {
+        setPage(target)
+        void selectText(id, target, 4).then(merge).catch(() => undefined)
+      }
+      setAlong(0)
       setPick(null)
     } catch (reason) {
       notify(reason instanceof Error ? reason.message : 'Не удалось загрузить страницу')
@@ -116,10 +153,17 @@ export default function Page() {
   }, [hit, page])
 
   async function onToken(index: number, lemma: string, translation?: string, align?: number) {
+    if (!data?.hasTranslation) {
+      const word = await selectWord(lemma)
+      setEntry(word)
+      setSaved(Boolean(word.saved))
+      setPick({ index, lemma, translation, align, phase: 'popup' })
+      return
+    }
     if (pick?.index === index && pick.phase === 'gloss') {
       const word = await selectWord(lemma)
       setEntry(word)
-      setSaved(false)
+      setSaved(Boolean(word.saved))
       setPick({ index, lemma, translation, align, phase: 'popup' })
       return
     }
@@ -127,13 +171,17 @@ export default function Page() {
   }
 
   async function addWord() {
-    if (!entry) return
+    if (!entry || saving) return
+    setSaving(true)
     try {
-      await addVocabulary(entry.lemma)
-      setSaved(true)
-      notify('Сохранено')
+      const context = pick ? sentenceAt(current?.tokens ?? [], pick.index) : ''
+      const result = await addVocabulary(entry.lemma, context)
+      setSaved(result.saved)
+      notify(result.saved ? 'Сохранено в словарь' : 'Убрано из словаря')
     } catch (reason) {
       notify(reason instanceof Error ? reason.message : 'Не удалось сохранить')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -159,7 +207,7 @@ export default function Page() {
         <span>{loading ? '…' : percent}</span>
       </header>
       {finished ? <div className="bar"><i style={{ width: '100%' }} /></div> : null}
-      {pick && data ? (
+      {pick && data.hasTranslation ? (
         <div className={styles.parallel}>
           {slice.length ? (
             <div className={styles.line} ref={lineRef} onClick={() => setPick(null)}>
@@ -181,7 +229,7 @@ export default function Page() {
       ) : null}
       <div className={styles.scroll} ref={scrollRef}>
         <p className={styles.text}>
-          {data.tokens.map((token, index) =>
+          {(current?.tokens ?? []).map((token, index) =>
             token.lemma ? (
               <button
                 key={index}
@@ -216,6 +264,7 @@ export default function Page() {
         className={styles.pager}
         page={page + 1}
         pages={data.pageCount}
+        jump
         prevDisabled={page <= 0 || finished || loading}
         nextDisabled={finished || loading}
         onPage={(next) => {
@@ -232,7 +281,7 @@ export default function Page() {
               rank={entry.rank}
               senses={entry.senses}
               leading={
-                <button className="icon-btn" onClick={addWord} aria-label="В словарь" style={{ color: saved ? 'var(--accent)' : 'var(--muted)' }}>
+                <button className="icon-btn" onClick={addWord} disabled={saving} aria-label={saved ? 'Убрать из словаря' : 'В словарь'} style={{ color: saved ? 'var(--accent)' : 'var(--muted)' }}>
                   <Star size={22} fill={saved ? 'currentColor' : 'none'} />
                 </button>
               }

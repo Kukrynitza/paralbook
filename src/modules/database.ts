@@ -28,6 +28,7 @@ export interface Texts {
   topic: string
   baseRating: number
   published: boolean
+  ready: Generated<boolean>
   createdAt: GeneratedAlways<Date>
 }
 
@@ -154,6 +155,21 @@ export interface LlmSettings {
   updatedAt: Generated<Date>
 }
 
+export interface TextJobs {
+  id: GeneratedAlways<string>
+  userId: string
+  textId: string | null
+  type: string
+  status: string
+  stage: string | null
+  progress: number
+  error: string | null
+  payload: unknown
+  result: unknown
+  createdAt: GeneratedAlways<Date>
+  updatedAt: Generated<Date>
+}
+
 export interface Database {
   profiles: Profiles
   texts: Texts
@@ -171,6 +187,7 @@ export interface Database {
   friendships: Friendships
   chatMessages: ChatMessages
   llmSettings: LlmSettings
+  textJobs: TextJobs
 }
 
 const connectionString = process.env.DATABASE_CONNECTION_STRING

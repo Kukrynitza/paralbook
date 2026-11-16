@@ -12,6 +12,7 @@ import {
   Users,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import JobDock from '@/components/JobDock/JobDock'
 import styles from './Frame.module.css'
 
 function NavItem({ to, end = false, children }: { to: string; end?: boolean; children: ReactNode }) {
@@ -69,6 +70,7 @@ export default function Frame({
       </aside>
       <div className={styles.phone}>
         <div className={styles.phoneBody}>{children}</div>
+        <JobDock aboveNav={showTabs} />
         {showTabs ? (
           <nav className={styles.tabs}>
             {tabs.map((item) => (

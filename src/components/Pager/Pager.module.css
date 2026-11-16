@@ -1,5 +1,7 @@
 .pager {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
   gap: 8px;
   padding: 8px 16px 24px;
@@ -23,4 +25,29 @@
 
 .pager button:disabled {
   opacity: 0.4;
+}
+
+.jump {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.input {
+  width: 52px;
+  height: 33px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: center;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.input:focus {
+  outline: 1px solid var(--accent);
 }

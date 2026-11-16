@@ -50,6 +50,12 @@ export default async function selectWord(word: string): Promise<DictEntry> {
         .orderBy('position', 'asc')
         .execute()
     : []
+  const saved = await database
+    .selectFrom('userWords')
+    .select('id')
+    .where('userId', '=', id)
+    .where('lemma', '=', entry.lemma)
+    .executeTakeFirst()
   return {
     lemma: entry.lemma,
     ipa: entry.ipa,
@@ -57,6 +63,7 @@ export default async function selectWord(word: string): Promise<DictEntry> {
     rank: entry.rank,
     example: entry.example,
     hint: entry.hint,
+    saved: Boolean(saved),
     senses: senses.length
       ? senses.map((sense) => ({
           pos: sense.pos,

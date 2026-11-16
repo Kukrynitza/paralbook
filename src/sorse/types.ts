@@ -91,6 +91,35 @@ export interface PageResult<T> {
   items: T[]
 }
 
+export interface SystemInfo {
+  app: {
+    version: string
+    next: string
+    node: string
+    env: string
+  }
+  service: {
+    url: string
+    ok: boolean
+    latencyMs: number
+    version: string | null
+    lemmas: number | null
+    wordForms: number | null
+  }
+  limits: {
+    maxUploadBytes: number
+    maxUploadText: number
+    maxTranslateChars: number
+  } | null
+  data: {
+    texts: number
+    words: number
+    mastered: number
+    read: number
+    lemmas: number
+  }
+}
+
 export interface ChatText {
   id: string
   title: string
@@ -116,6 +145,12 @@ export interface RuToken {
   text: string
 }
 
+export interface ReadPage {
+  page: number
+  tokens: ReadToken[]
+  ruTokens: RuToken[]
+}
+
 export interface ReadPayload {
   id: string
   title: string
@@ -124,8 +159,8 @@ export interface ReadPayload {
   page: number
   pageCount: number
   progress: number
-  tokens: ReadToken[]
-  ruTokens: RuToken[]
+  hasTranslation: boolean
+  pages: ReadPage[]
 }
 
 export interface DictEntry {
@@ -136,6 +171,7 @@ export interface DictEntry {
   senses: { pos: string; text: string; examples: { textEn: string; textRu: string | null }[] }[]
   example: string | null
   hint: string | null
+  saved?: boolean
 }
 
 export interface VocabItem {
@@ -161,6 +197,7 @@ export interface SessionCard {
   example: string | null
   hint: string | null
   note: string | null
+  context: string | null
   pos: string | null
   level: string | null
   band: string | null

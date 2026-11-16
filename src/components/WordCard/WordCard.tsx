@@ -52,6 +52,14 @@ export default function WordCard({
         <hr className="line" />
         <div className={styles.sheet}>
           {showTranslation ? <p className={styles.gloss}>{card.translation || 'Перевода нет'}</p> : null}
+          {card.context ? (
+            <div className={styles.sample}>
+              <p className={styles.origin}>Из вашего текста</p>
+              <p className={styles.spoken}>
+                <span>{paint(card.context, [card.lemma])}</span>
+              </p>
+            </div>
+          ) : null}
           {card.examples.length ? (
             card.examples.map((item) => (
               <div key={item.textEn} className={showTranslation ? styles.pair : styles.sample}>

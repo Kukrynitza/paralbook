@@ -6,11 +6,14 @@ import { maxValue, minLength, minValue, number, picklist, pipe, safeParse, strin
 import deleteChatMessage from '@/actions/Chat/deleteChatMessage'
 import generateText from '@/actions/Chat/generateText'
 import selectChat from '@/actions/Chat/selectChat'
+import syncChatJobs from '@/actions/Chat/syncChatJobs'
 import selectCollection from '@/actions/Collection/selectCollection'
 import publishCollection from '@/actions/Collection/publishCollection'
 import deleteText from '@/actions/Reading/deleteText'
 import { LEVELS, type Cefr, type ChatMessage } from '@/sorse/types'
 import { useAuth, useUi } from '@/contexts/AuthContext'
+import { statusLabel, useJobs } from '@/contexts/JobContext'
+import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import { preview } from '@/sorse/preview'
 import styles from './page.module.css'
 
@@ -38,9 +41,15 @@ function pick<T>(items: readonly T[]) {
 export default function Page() {
   const { user } = useAuth()
   const { confirm, notify } = useUi()
+  const { trackJob, jobs, revision, busyJob } = useJobs()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [stage, setStage] = useState('')
+  const [activeJob, setActiveJob] = useState<string | null>(null)
+  const [publishingId, setPublishingId] = useState<string | null>(null)
+  const [publishBusy, setPublishBusy] = useState(false)
 
   async function load() {
     const data = await selectChat()
@@ -49,15 +58,47 @@ export default function Page() {
 
   useEffect(() => {
     let active = true
-    selectChat().then((data) => active && setMessages(data.messages))
+    syncChatJobs()
+      .catch(() => undefined)
+      .then(() => selectChat())
+      .then((data) => active && setMessages(data.messages))
+      .catch(() => undefined)
     return () => {
       active = false
     }
   }, [])
 
+  useEffect(() => {
+    if (!activeJob) return
+    const job = jobs.find((item) => item.id === activeJob)
+    if (!job) return
+    setProgress(job.progress)
+    setStage(job.stage ?? '')
+    if (job.status === 'done' || job.status === 'error') {
+      setActiveJob(null)
+      setPending(false)
+      setProgress(0)
+      setStage('')
+      void load().catch((reason: unknown) => {
+        notify(reason instanceof Error ? reason.message : 'Не удалось обновить чат')
+      })
+    }
+  }, [activeJob, jobs, notify])
+
+  useEffect(() => {
+    if (!revision) return
+    void load().catch((reason: unknown) => {
+      notify(reason instanceof Error ? reason.message : 'Не удалось обновить чат')
+    })
+  }, [revision, notify])
+
   async function send(topic: string, minutes?: number, level?: Cefr) {
     const clean = topic.trim()
     if (!clean || !user) return
+    if (busyJob) {
+      notify('Дождитесь завершения текущей задачи')
+      return
+    }
     const parsedMinutes = askedMinutes(clean) ?? minutes ?? pick(DURATIONS)
     const found = clean.match(/\b(A1|A2|B1|B2|C1|C2)\b/i)
     const levelFromText = found?.[1].toUpperCase() as Cefr | undefined
@@ -87,18 +128,20 @@ export default function Page() {
       return
     }
     setPending(true)
+    setProgress(0)
+    setStage('generating')
     setDraft('')
     try {
-      await generateText({ topic: topicCheck.output, minutes: minutesCheck.output, level: levelCheck.output })
+      const job = await generateText({ topic: topicCheck.output, minutes: minutesCheck.output, level: levelCheck.output })
+      trackJob({ id: job.jobId, textId: job.textId, title: topicCheck.output, type: 'chat' })
+      setActiveJob(job.jobId)
+      await load()
     } catch (reason) {
       notify(reason instanceof Error ? reason.message : 'Не удалось')
-    } finally {
-      try {
-        await load()
-      } catch (reason) {
-        notify(reason instanceof Error ? reason.message : 'Не удалось обновить чат')
-      }
       setPending(false)
+      setProgress(0)
+      setStage('')
+      await load().catch(() => undefined)
     }
   }
 
@@ -124,13 +167,22 @@ export default function Page() {
     }
   }
 
-  async function publish(entryId: string) {
-    const list = await selectCollection('new', 1)
-    const entry = list.items.find((item) => item.textId === entryId)
-    if (!entry) return
-    await publishCollection(entry.id)
-    await load()
-    notify('Текст опубликован')
+  async function publish() {
+    if (!publishingId) return
+    setPublishBusy(true)
+    try {
+      const list = await selectCollection('new', 1)
+      const entry = list.items.find((item) => item.textId === publishingId)
+      if (!entry) throw new Error('В подборке нет такого текста')
+      await publishCollection(entry.id)
+      setPublishingId(null)
+      await load()
+      notify('Текст опубликован')
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось опубликовать')
+    } finally {
+      setPublishBusy(false)
+    }
   }
 
   return (
@@ -181,7 +233,7 @@ export default function Page() {
                   Читать
                 </Link>
                 {card.published ? null : (
-                  <button className="btn ghost wrap" onClick={() => publish(card.id)}>
+                  <button className="btn ghost wrap" onClick={() => setPublishingId(card.id)}>
                     Опубликовать в библиотеку
                   </button>
                 )}
@@ -192,23 +244,58 @@ export default function Page() {
             </article>
           )
         })}
-        {pending ? <div className={styles.wait}>Собираю текст…</div> : null}
+        {pending ? (
+          <div className={styles.wait}>
+            Собираю текст…{progress ? ` ${progress}%` : ''}
+            {stage === 'generating' ? ' · генерирую' : stage === 'aligning' ? ' · выравниваю' : stage === 'saving' ? ' · сохраняю' : ''}
+          </div>
+        ) : null}
       </div>
-      <form
-        className={styles.composer}
-        onSubmit={(event) => {
-          event.preventDefault()
-          void send(draft)
-        }}
+      {busyJob ? (
+        <div className={styles.busy}>
+          <strong>Сейчас выполняется: {busyJob.title}</strong>
+          <div className="bar"><i style={{ width: `${Math.max(2, busyJob.progress)}%` }} /></div>
+          <div className="row small muted">
+            <span>{statusLabel(busyJob.stage)}</span>
+            <span>{busyJob.progress}%</span>
+          </div>
+          <p className="small muted" style={{ margin: 0 }}>
+            Новый запрос можно отправить после завершения. Можно уйти — прогресс останется внизу.
+          </p>
+        </div>
+      ) : (
+        <form
+          className={styles.composer}
+          onSubmit={(event) => {
+            event.preventDefault()
+            void send(draft)
+          }}
+        >
+          <Link className={styles.own} href="/text">
+            Добавить текст
+          </Link>
+          <input className="input" value={draft} placeholder="Тема и время чтения" onChange={(event) => setDraft(event.target.value)} />
+          <button className={styles.send} aria-label="Отправить" title="Отправить" disabled={pending}>
+            →
+          </button>
+        </form>
+      )}
+      <ConfirmDialog
+        open={Boolean(publishingId)}
+        title="Опубликовать текст?"
+        confirmLabel="Опубликовать"
+        busyLabel="Публикую…"
+        busy={publishBusy}
+        onClose={() => setPublishingId(null)}
+        onConfirm={() => void publish()}
       >
-        <Link className={styles.own} href="/upload">
-          Свой текст
-        </Link>
-        <input className="input" value={draft} placeholder="Тема и время чтения" onChange={(event) => setDraft(event.target.value)} />
-        <button className={styles.send} aria-label="Отправить" title="Отправить" disabled={pending}>
-          →
-        </button>
-      </form>
+        <p>Текст появится в общей библиотеке и станет виден другим пользователям.</p>
+        <ul>
+          <li>его смогут читать, оценивать и добавлять в свою подборку;</li>
+          <li>он попадёт в поиск и рейтинг библиотеки;</li>
+          <li>убрать текст из библиотеки после публикации нельзя.</li>
+        </ul>
+      </ConfirmDialog>
     </div>
   )
 }

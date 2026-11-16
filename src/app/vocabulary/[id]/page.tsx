@@ -117,6 +117,12 @@ export default function Page() {
         }
       />
       <div className="pad stack">
+        {item.contextEn ? (
+          <div className="card">
+            <div className="label">Из текста</div>
+            <p className="small" style={{ margin: '6px 0 0' }}>{item.contextEn}</p>
+          </div>
+        ) : null}
         <div className={item.tone === 'ok' ? `${styles.stats} ${styles.statsOk}` : `${styles.stats} ${styles.statsError}`}>
           Верно: {item.correct} · Ошибки: {item.wrong}
         </div>

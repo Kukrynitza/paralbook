@@ -4,6 +4,7 @@ import { useEffect, type ReactNode } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Frame from '@/components/Frame/Frame'
 import { AuthProvider, UiProvider, useAuth } from '@/contexts/AuthContext'
+import { JobProvider } from '@/contexts/JobContext'
 
 const openPages = ['/login', '/register']
 
@@ -39,7 +40,9 @@ export default function Shell({ children }: { children: ReactNode }) {
   return (
     <AuthProvider>
       <UiProvider>
-        <FrameForPath>{children}</FrameForPath>
+        <JobProvider>
+          <FrameForPath>{children}</FrameForPath>
+        </JobProvider>
       </UiProvider>
     </AuthProvider>
   )

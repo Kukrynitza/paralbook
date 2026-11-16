@@ -1,4 +1,15 @@
+'use client'
+
+import { useEffect, useState } from 'react'
 import styles from './Pager.module.css'
+
+const WINDOW = 5
+
+function pageWindow(page: number, pages: number) {
+  if (pages <= WINDOW) return Array.from({ length: pages }, (_, index) => index + 1)
+  const start = Math.max(1, Math.min(page - Math.floor(WINDOW / 2), pages - WINDOW + 1))
+  return Array.from({ length: WINDOW }, (_, index) => start + index)
+}
 
 export default function Pager({
   page,
@@ -7,6 +18,7 @@ export default function Pager({
   className,
   prevDisabled,
   nextDisabled,
+  jump,
 }: {
   page: number
   pages: number
@@ -14,11 +26,28 @@ export default function Pager({
   className?: string
   prevDisabled?: boolean
   nextDisabled?: boolean
+  jump?: boolean
 }) {
-  const windowStart = Math.max(1, Math.min(page - 1, pages - 2))
-  const labels = pages <= 3 ? Array.from({ length: pages }, (_, index) => index + 1) : [windowStart, windowStart + 1, windowStart + 2].filter((item) => item <= pages)
+  const labels = pageWindow(page, pages)
   const backOff = prevDisabled ?? page <= 1
   const forwardOff = nextDisabled ?? page >= pages
+  const [draft, setDraft] = useState(String(page))
+
+  useEffect(() => {
+    setDraft(String(page))
+  }, [page])
+
+  function commit() {
+    const value = Number(draft.replace(/\D/g, ''))
+    if (!Number.isFinite(value) || value < 1) {
+      setDraft(String(page))
+      return
+    }
+    const next = Math.min(pages, Math.max(1, Math.trunc(value)))
+    setDraft(String(next))
+    if (next !== page) onPage(next)
+  }
+
   return (
     <div className={className ? `${styles.pager} ${className}` : styles.pager}>
       <button type="button" disabled={backOff} onClick={() => onPage(page - 1)} aria-label="Назад">
@@ -32,6 +61,26 @@ export default function Pager({
       <button type="button" disabled={forwardOff} onClick={() => onPage(page + 1)} aria-label="Дальше">
         →
       </button>
+      {jump && pages > 1 ? (
+        <form
+          className={styles.jump}
+          onSubmit={(event) => {
+            event.preventDefault()
+            commit()
+          }}
+        >
+          <input
+            className={styles.input}
+            inputMode="numeric"
+            aria-label="Номер страницы"
+            value={draft}
+            disabled={backOff && forwardOff}
+            onChange={(event) => setDraft(event.target.value.replace(/\D/g, '').slice(0, String(pages).length))}
+            onBlur={commit}
+          />
+          <span>из {pages}</span>
+        </form>
+      ) : null}
     </div>
   )
 }

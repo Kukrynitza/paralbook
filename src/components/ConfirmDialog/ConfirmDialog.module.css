@@ -1,0 +1,27 @@
+.dialog {
+  max-width: 420px;
+}
+
+.body {
+  margin: 0 0 16px;
+}
+
+.body p {
+  margin: 0 0 10px;
+}
+
+.body p:last-child {
+  margin-bottom: 0;
+}
+
+.body ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.body li + li {
+  margin-top: 4px;
+}

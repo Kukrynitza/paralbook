@@ -12,6 +12,8 @@ import deleteText from '@/actions/Reading/deleteText'
 import voteLibrary from '@/actions/Library/voteLibrary'
 import { type CollectionItem, type PageResult, type Today } from '@/sorse/types'
 import { useUi } from '@/contexts/AuthContext'
+import { useJobs } from '@/contexts/JobContext'
+import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import Pager from '@/components/Pager/Pager'
 import Ring from '@/components/Ring/Ring'
 import Stars from '@/components/Stars/Stars'
@@ -27,11 +29,14 @@ const sorts = [
 
 export default function Page() {
   const { confirm, notify } = useUi()
+  const { revision } = useJobs()
   const [sort, setSort] = useState('new')
   const [page, setPage] = useState(1)
   const [today, setToday] = useState<Today | null>(null)
   const [list, setList] = useState<PageResult<CollectionItem> | null>(null)
   const [error, setError] = useState('')
+  const [publishing, setPublishing] = useState<CollectionItem | null>(null)
+  const [publishBusy, setPublishBusy] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -41,7 +46,7 @@ export default function Page() {
     return () => {
       active = false
     }
-  }, [])
+  }, [revision])
 
   useEffect(() => {
     let active = true
@@ -51,7 +56,7 @@ export default function Page() {
     return () => {
       active = false
     }
-  }, [page, sort])
+  }, [page, sort, revision])
 
   async function remove(item: CollectionItem) {
     const ok = await confirm(item.source === 'chat' && !item.published ? 'Удалить текст?' : 'Убрать текст из подборки?')
@@ -89,10 +94,19 @@ export default function Page() {
     }
   }
 
-  async function publish(item: CollectionItem) {
-    await publishCollection(item.id)
-    setList(await selectCollection(sort, page))
-    notify('Текст опубликован')
+  async function publish() {
+    if (!publishing) return
+    setPublishBusy(true)
+    try {
+      await publishCollection(publishing.id)
+      setPublishing(null)
+      setList(await selectCollection(sort, page))
+      notify('Текст опубликован')
+    } catch (reason: unknown) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось опубликовать')
+    } finally {
+      setPublishBusy(false)
+    }
   }
 
   return (
@@ -211,7 +225,7 @@ export default function Page() {
               </div>
               {item.source === 'chat' && !item.published ? (
                 <div className="actions">
-                  <button className="btn ghost wrap" onClick={() => publish(item)}>
+                  <button className="btn ghost wrap" onClick={() => setPublishing(item)}>
                     Опубликовать в библиотеку
                   </button>
                   <button className="btn danger slim" onClick={() => remove(item)}>
@@ -230,6 +244,22 @@ export default function Page() {
         </div>
       )}
       {list && list.total > 0 ? <Pager page={list.page} pages={list.pages} onPage={setPage} /> : null}
+      <ConfirmDialog
+        open={Boolean(publishing)}
+        title="Опубликовать текст?"
+        confirmLabel="Опубликовать"
+        busyLabel="Публикую…"
+        busy={publishBusy}
+        onClose={() => setPublishing(null)}
+        onConfirm={() => void publish()}
+      >
+        <p>Текст появится в общей библиотеке и станет виден другим пользователям.</p>
+        <ul>
+          <li>его смогут читать, оценивать и добавлять в свою подборку;</li>
+          <li>он попадёт в поиск и рейтинг библиотеки;</li>
+          <li>убрать текст из библиотеки после публикации нельзя.</li>
+        </ul>
+      </ConfirmDialog>
     </div>
   )
 }
