@@ -1,5 +1,3 @@
-// Разбор книг выполняется в браузере: модуль использует File и DOMParser.
-// Импортировать его можно только из клиентских компонентов ('use client').
 
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_TEXT, MIN_UPLOAD_TEXT } from '@/sorse/uploadLimits'
 import { normalizeText } from './decode'

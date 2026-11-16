@@ -49,11 +49,11 @@ function pageTexts(english: string) {
   return pages.length ? pages : [english]
 }
 
-async function lemmaOf(db: Db, forms: string[]) {
+export async function lemmaOf(db: Db, forms: string[]) {
   const exact = new Set<string>()
   const best = new Map<string, { lemma: string; rank: number }>()
-  for (let index = 0; index < forms.length; index += 500) {
-    const chunk = forms.slice(index, index + 500)
+  for (let index = 0; index < forms.length; index += 1000) {
+    const chunk = forms.slice(index, index + 1000)
     const lemmas = await db.selectFrom('lemmas').select('lemma').where('lemma', 'in', chunk).execute()
     for (const row of lemmas) exact.add(row.lemma)
     const formsRows = await db
@@ -122,6 +122,39 @@ export async function rewritePages(db: Db, textId: string, english: string, russ
     await db.deleteFrom('pages').where('textId', '=', textId).execute()
   }
   await writePages(db, textId, english, russian)
+}
+
+export interface ParallelPage {
+  en: { text: string; align: number | null }[]
+  ru: { text: string }[]
+}
+
+export async function appendParallelPages(db: Db, textId: string, offset: number, pages: ParallelPage[]) {
+  if (!pages.length) return
+  const inserted = await db
+    .insertInto('pages')
+    .values(pages.map((_, index) => ({ textId, position: offset + index })))
+    .returning(['id', 'position'])
+    .execute()
+  if (inserted.length !== pages.length) throw new Error('Не удалось создать страницы книги')
+  const pageIds = new Map(inserted.map((page) => [page.position, page.id]))
+  const ruRows: { pageId: string; position: number; text: string }[] = []
+  const enRows: { pageId: string; position: number; text: string; align: number | null }[] = []
+  for (const [index, page] of pages.entries()) {
+    const pageId = pageIds.get(offset + index)
+    if (!pageId) throw new Error('Не удалось создать страницы книги')
+    page.ru.forEach((token, position) => ruRows.push({ pageId, position, text: token.text }))
+    page.en.forEach((token, position) => enRows.push({ pageId, position, text: token.text, align: token.align }))
+  }
+  for (let index = 0; index < ruRows.length; index += 2000) {
+    await db.insertInto('ruTokens').values(ruRows.slice(index, index + 2000)).execute()
+  }
+  const forms = [...new Set(enRows.map((row) => bare(row.text)).filter(Boolean))]
+  const known = await lemmaOf(db, forms)
+  const values = enRows.map((row) => ({ ...row, lemma: known.get(bare(row.text)) ?? null }))
+  for (let index = 0; index < values.length; index += 1000) {
+    await db.insertInto('enTokens').values(values.slice(index, index + 1000)).execute()
+  }
 }
 
 export async function persistText(

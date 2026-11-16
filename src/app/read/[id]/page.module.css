@@ -29,6 +29,7 @@
   padding: 16px 20px 20px;
   font-size: 18px;
   line-height: 28px;
+  white-space: pre-wrap;
 }
 
 @media (min-width: 768px) {
@@ -49,6 +50,7 @@
   color: inherit;
   border-radius: 4px;
   cursor: pointer;
+  white-space: pre-wrap;
 }
 
 .token:hover,

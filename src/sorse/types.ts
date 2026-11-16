@@ -124,7 +124,8 @@ export interface ReadPayload {
   page: number
   pageCount: number
   progress: number
-  pages: { ruTokens: RuToken[]; tokens: ReadToken[] }[]
+  tokens: ReadToken[]
+  ruTokens: RuToken[]
 }
 
 export interface DictEntry {

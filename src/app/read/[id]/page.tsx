@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Star, Volume2, X } from 'lucide-react'
@@ -18,30 +18,6 @@ function wordTokens<T extends { text: string }>(tokens: T[]) {
   return tokens.filter((token) => token.text.trim())
 }
 
-function splitByShare<T>(items: T[], weights: number[]) {
-  const total = weights.reduce((sum, value) => sum + value, 0)
-  if (!total) return weights.map(() => [] as T[])
-  let used = 0
-  return weights.map((weight, index) => {
-    const start = Math.round((items.length * used) / total)
-    used += weight
-    const end = index === weights.length - 1 ? items.length : Math.round((items.length * used) / total)
-    return items.slice(start, end)
-  })
-}
-
-function russianSlices(pages: ReadPayload['pages']) {
-  const own = pages.map((page) => wordTokens(page.ruTokens))
-  const weights = pages.map((page) => wordTokens(page.tokens).length)
-  if (pages.length < 2) return own
-  const dump = own.findIndex((words, index) => {
-    const rest = own.reduce((sum, item, itemIndex) => (itemIndex === index ? sum : sum + item.length), 0)
-    return words.length > weights[index] * 2 && rest <= 8
-  })
-  if (dump < 0) return own
-  return splitByShare(own[dump], weights)
-}
-
 export default function Page() {
   const params = useParams()
   const id = String(params?.id ?? '')
@@ -55,11 +31,11 @@ export default function Page() {
   const [pick, setPick] = useState<{ index: number; lemma: string; translation?: string; align?: number; phase: 'gloss' | 'popup' } | null>(null)
   const [entry, setEntry] = useState<DictEntry | null>(null)
   const [saved, setSaved] = useState(false)
+  const [loading, setLoading] = useState(false)
   const lineRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const slices = useMemo(() => (data ? russianSlices(data.pages) : []), [data])
-  const slice = slices[page] ?? []
-  const wordCount = data ? wordTokens(data.pages[page]?.tokens ?? []).length : 0
+  const slice = data ? wordTokens(data.ruTokens) : []
+  const wordCount = data ? wordTokens(data.tokens).length : 0
   const hit = pick?.align === undefined || !slice.length
     ? undefined
     : Math.min(slice.length - 1, Math.floor((pick.align * slice.length) / Math.max(1, wordCount)))
@@ -84,15 +60,24 @@ export default function Page() {
   }, [id])
 
   async function go(next: number) {
-    if (!data) return
+    if (!data || loading) return
     const value = Math.max(0, next)
-    const result = await saveProgress(id, value)
-    setFinished(result.finished)
-    if (!result.finished) {
-      setPage(result.page)
-      setAlong(0)
+    setLoading(true)
+    try {
+      const result = await saveProgress(id, value)
+      setFinished(result.finished)
+      if (!result.finished) {
+        const payload = await selectText(id, result.page)
+        setData(payload)
+        setPage(result.page)
+        setAlong(0)
+      }
+      setPick(null)
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось загрузить страницу')
+    } finally {
+      setLoading(false)
     }
-    setPick(null)
   }
 
   useEffect(() => {
@@ -160,7 +145,6 @@ export default function Page() {
 
   if (error) return <p className="form-error pad">{error}</p>
   if (!data) return <p className="pad muted">Загрузка…</p>
-  const current = data.pages[page]
   const percent = finished
     ? '100%'
     : `${Math.round(((page + along) / Math.max(1, data.pageCount)) * 100)}%`
@@ -172,10 +156,10 @@ export default function Page() {
           <ArrowLeft size={22} />
         </button>
         <div className="grow">{data.title}</div>
-        <span>{percent}</span>
+        <span>{loading ? '…' : percent}</span>
       </header>
       {finished ? <div className="bar"><i style={{ width: '100%' }} /></div> : null}
-      {pick && current ? (
+      {pick && data ? (
         <div className={styles.parallel}>
           {slice.length ? (
             <div className={styles.line} ref={lineRef} onClick={() => setPick(null)}>
@@ -197,7 +181,7 @@ export default function Page() {
       ) : null}
       <div className={styles.scroll} ref={scrollRef}>
         <p className={styles.text}>
-          {current?.tokens.map((token, index) =>
+          {data.tokens.map((token, index) =>
             token.lemma ? (
               <button
                 key={index}
@@ -232,10 +216,10 @@ export default function Page() {
         className={styles.pager}
         page={page + 1}
         pages={data.pageCount}
-        prevDisabled={page <= 0 || finished}
-        nextDisabled={finished}
+        prevDisabled={page <= 0 || finished || loading}
+        nextDisabled={finished || loading}
         onPage={(next) => {
-          if (!finished) go(next - 1)
+          if (!finished && !loading) void go(next - 1)
         }}
       />
       {pick?.phase === 'popup' && entry ? (
