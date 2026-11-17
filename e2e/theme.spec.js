@@ -54,6 +54,20 @@ test('theme and fonts are stored in the account', async ({ browser }) => {
   await second.close()
 })
 
+test('text size buttons update the preview', async ({ page }) => {
+  await page.goto('http://localhost:5173/settings')
+  await page.getByRole('button', { name: /Шрифты/ }).click()
+  const sample = page.locator('div[class*="fontSample"]')
+  await page.getByRole('button', { name: 'L', exact: true }).click()
+  await expect(page.getByText('Размер текста · 22px')).toBeVisible()
+  await expect.poll(async () => sample.evaluate((element) => getComputedStyle(element).fontSize)).toBe('22px')
+  await page.getByRole('button', { name: 'S', exact: true }).click()
+  await expect(page.getByText('Размер текста · 17px')).toBeVisible()
+  await expect.poll(async () => sample.evaluate((element) => getComputedStyle(element).fontSize)).toBe('17px')
+  await page.getByRole('button', { name: 'M', exact: true }).click()
+  await expect(page.getByText('Размер текста · 19px')).toBeVisible()
+})
+
 test('resetting the theme restores the defaults', async ({ page }) => {
   await page.goto('http://localhost:5173/settings')
   await page.getByRole('button', { name: 'Настроить цвета' }).click()

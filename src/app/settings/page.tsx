@@ -39,7 +39,7 @@ import {
   type ChunkPrefs,
   type ChunkUnit,
 } from '@/sorse/translationPrefs'
-import { FONTS, READING_FONTS, UI_FONTS, type FontId, type ReaderSize } from '@/sorse/fonts'
+import { FONTS, READER_SIZES, READING_FONTS, UI_FONTS, type FontId, type ReaderSize } from '@/sorse/fonts'
 import { paletteFor } from '@/sorse/themePrefs'
 import { THEME_PRESETS, type ThemeMode } from '@/sorse/themeTypes'
 import Help from '@/components/Help/Help'
@@ -609,7 +609,7 @@ export default function Page() {
             </select>
           </label>
           <div className="row">
-            <span className={styles.labelMuted}>Размер текста</span>
+            <span className={styles.labelMuted}>Размер текста · {READER_SIZES[prefs.fonts.size]}</span>
             <div className={styles.segSmall}>
               {SIZES.map((size) => (
                 <button
@@ -623,7 +623,10 @@ export default function Page() {
               ))}
             </div>
           </div>
-          <div className={styles.fontSample} style={fontPreview}>
+          <div
+            className={styles.fontSample}
+            style={{ ...fontPreview, fontSize: READER_SIZES[prefs.fonts.size] }}
+          >
             <b>The morning was quiet.</b>
             <p>Утро было тихим, и озеро спало под туманом.</p>
           </div>

@@ -26,6 +26,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
   const timer = useRef<number | null>(null)
   const pending = useRef<ThemePrefs | null>(null)
+  const touched = useRef(false)
 
   useEffect(() => {
     const cached = readThemeCache()
@@ -34,6 +35,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!authReady) return
+    touched.current = false
     if (!user) {
       clearAppliedTheme()
       setPrefs(DEFAULT_THEME)
@@ -44,6 +46,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     selectTheme()
       .then((stored) => {
         if (!active) return
+        if (touched.current) {
+          setReady(true)
+          return
+        }
         const fallback = normalizeTheme(readThemeCache()?.prefs ?? null, user.theme)
         const next = stored ? normalizeTheme(stored) : fallback
         setPrefs(next)
@@ -99,6 +105,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }
 
   function save(next: ThemePrefs) {
+    touched.current = true
     const value = normalizeTheme(next)
     setPrefs(value)
     applyTheme(value, pathname)

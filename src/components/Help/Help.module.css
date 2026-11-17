@@ -1,6 +1,10 @@
 .modal {
   max-width: 560px;
   max-height: 86vh;
+  max-height: 86dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .head {
@@ -8,6 +12,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex: none;
 }
 
 .head h2 {
@@ -18,12 +23,21 @@
   display: flex;
   gap: 6px;
   margin: 10px 0 8px;
+  flex: none;
 }
 
 .body {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  margin: 0 0 16px;
-  padding-right: 2px;
+  overscroll-behavior: contain;
+  margin: 0 0 12px;
+  padding-right: 4px;
+}
+
+.modal :global(.actions) {
+  flex: none;
+  margin-top: 0;
 }
 
 .guide {
