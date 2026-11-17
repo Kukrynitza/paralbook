@@ -203,25 +203,78 @@ class Database:
             f"from {DATABASE_SCHEMA}.text_jobs where id=%s"
         )
         job = await self.fetch_one(query, (job_id,))
-        if job and job.get("status") in ("queued", "running") and job.get("updated_at"):
+        if job and job.get("status") in ("uploading", "queued", "running") and job.get("updated_at"):
             updated = job["updated_at"]
-            if isinstance(updated, datetime) and datetime.now(timezone.utc) - updated > timedelta(minutes=10):
+            limit = 30 if job.get("status") == "uploading" else 15
+            if isinstance(updated, datetime) and datetime.now(timezone.utc) - updated > timedelta(minutes=limit):
                 await self.update_job(
                     job_id, status="error", stage="error", progress=100,
-                    error="Задание зависло: нет обновлений больше 10 минут",
+                    error="Задание зависло: нет обновлений слишком долго",
                 )
                 job = await self.fetch_one(query, (job_id,))
         return job
 
+    async def touch_job(self, job_id: str) -> None:
+        await self.execute(
+            f"update {DATABASE_SCHEMA}.text_jobs set updated_at=now() where id=%s", (job_id,)
+        )
+
+    async def claim_job(self, job_id: str, user_id: str, payload: dict) -> dict[str, Any] | None:
+        await self.execute(
+            f"""update {DATABASE_SCHEMA}.text_jobs
+                set status='queued', stage='queued', progress=0, error=null, payload=%s, updated_at=now()
+                where id=%s and user_id=%s and status='uploading'""",
+            (Jsonb(payload), job_id, user_id),
+        )
+        return await self.get_job(job_id)
+
+    async def sweep(self) -> dict[str, int]:
+        stale = await self.fetch_all(
+            f"""update {DATABASE_SCHEMA}.text_jobs
+                set status='error', stage='error', progress=100, error='Задание зависло: нет обновлений слишком долго'
+                where status in ('queued', 'running')
+                  and updated_at < now() - interval '15 minutes'
+                returning id, text_id, user_id"""
+        )
+        stale_uploads = await self.fetch_all(
+            f"""update {DATABASE_SCHEMA}.text_jobs
+                set status='error', stage='error', progress=100, error='Загрузка файла не завершилась'
+                where status='uploading'
+                  and updated_at < now() - interval '30 minutes'
+                returning id, text_id, user_id"""
+        )
+        orphans = await self.fetch_all(
+            f"""select t.id, t.owner_id
+                from {DATABASE_SCHEMA}.texts t
+                where t.ready = false
+                  and t.created_at < now() - interval '30 minutes'
+                  and not exists (
+                    select 1 from {DATABASE_SCHEMA}.text_jobs j
+                    where j.text_id = t.id and j.status in ('uploading', 'queued', 'running')
+                  )"""
+        )
+        for row in orphans:
+            await self.delete_text(str(row["id"]), str(row["owner_id"]))
+        pruned = await self.execute(
+            f"""delete from {DATABASE_SCHEMA}.text_jobs
+                where status in ('done', 'error', 'cancelled')
+                  and updated_at < now() - interval '7 days'"""
+        )
+        return {
+            "stale": len(stale) + len(stale_uploads),
+            "orphans": len(orphans),
+            "pruned": 0,
+        }
+
     async def update_job(self, job_id: str, **fields: Any) -> None:
-        allowed = {"status", "stage", "progress", "error", "text_id", "result"}
+        allowed = {"status", "stage", "progress", "error", "text_id", "result", "payload"}
         sets = []
         values: list[Any] = []
         for key, value in fields.items():
             if key not in allowed:
                 continue
             sets.append(f"{key}=%s")
-            values.append(Jsonb(value) if key == "result" else value)
+            values.append(Jsonb(value) if key in ("result", "payload") else value)
         if not sets:
             return
         sets.append("updated_at=now()")
@@ -230,5 +283,3 @@ class Database:
             f"update {DATABASE_SCHEMA}.text_jobs set {', '.join(sets)} where id=%s", tuple(values)
         )
 
-    async def delete_job(self, job_id: str) -> None:
-        await self.execute(f"delete from {DATABASE_SCHEMA}.text_jobs where id=%s", (job_id,))

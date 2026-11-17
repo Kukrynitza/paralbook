@@ -1,11 +1,10 @@
 'use client'
 
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Eye, EyeOff, Info, X } from 'lucide-react'
 import { minLength, pipe, safeParse, string } from 'valibot'
-import llmAccess from '@/actions/Llm/access'
 import changePasswordAction from '@/actions/Profile/changePassword'
 import systemInfo from '@/actions/Profile/systemInfo'
 import updateMe from '@/actions/Profile/updateMe'
@@ -13,6 +12,9 @@ import seedVocabulary from '@/actions/Vocabulary/seedVocabulary'
 import { GOALS, INTERESTS, LEVELS, type Cefr, type LlmSettingsView, type SystemInfo, type ThemePref, type User } from '@/sorse/types'
 import { useAuth, useUi } from '@/contexts/AuthContext'
 import { markSeedAsked } from '@/sorse/prefs'
+import { llmRequest } from '@/sorse/llmClient'
+import { DEFAULT_CHUNK, normalizeChunk, readChunkPrefs, requestsPer10k, writeChunkPrefs, type ChunkPrefs, type ChunkUnit } from '@/sorse/translationPrefs'
+import Help from '@/components/Help/Help'
 import styles from './page.module.css'
 
 const currentSchema = pipe(string(), minLength(1, 'Введите текущий пароль'))
@@ -34,37 +36,9 @@ function providerFor(baseUrl: string) {
   return LLM_PRESETS.find((item) => item.baseUrl && item.baseUrl === baseUrl)?.id ?? 'custom'
 }
 
-function Row({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className={styles.row}>
-      <span>{label}</span>
-      <b>{value}</b>
-    </div>
-  )
-}
-
-async function llmRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const access = await llmAccess()
-  const response = await fetch(`${access.url}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${access.token}`,
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(init.headers || {}),
-    },
-    cache: 'no-store',
-  })
-  const text = await response.text()
-  const data = text ? JSON.parse(text) : null
-  if (!response.ok) {
-    throw new Error(data && typeof data === 'object' && 'detail' in data ? String(data.detail) : 'Сервис модели ответил ошибкой')
-  }
-  return data as T
-}
-
 export default function Page() {
   const { user, setUser, logout } = useAuth()
-  const { confirm, notify } = useUi()
+  const { confirm, notify, notifyError } = useUi()
   const router = useRouter()
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
@@ -81,6 +55,9 @@ export default function Page() {
   const [llmBusy, setLlmBusy] = useState<'save' | 'test' | 'models' | 'clear' | null>(null)
   const [llmCheck, setLlmCheck] = useState<{ ok: boolean; text: string } | null>(null)
   const [llmModels, setLlmModels] = useState<string[]>([])
+  const [modelsOpen, setModelsOpen] = useState(false)
+  const [modelQuery, setModelQuery] = useState('')
+  const [chunk, setChunk] = useState<ChunkPrefs>(DEFAULT_CHUNK)
   const [info, setInfo] = useState<SystemInfo | null>(null)
   const [infoOpen, setInfoOpen] = useState(false)
   const [infoLoading, setInfoLoading] = useState(false)
@@ -107,7 +84,18 @@ export default function Page() {
     }
   }, [llmUserId])
 
+  useEffect(() => {
+    setChunk(readChunkPrefs())
+  }, [])
+
   if (!user) return null
+
+  const modelChoices = llmModels.filter((item) => !/embed|whisper|tts|dall-e|stable-diffusion|moderation|rerank/i.test(item))
+  const modelFilter = modelQuery.trim().toLowerCase()
+  const filteredModels = modelFilter
+    ? modelChoices.filter((item) => item.toLowerCase().includes(modelFilter))
+    : modelChoices
+  const shownModels = filteredModels.slice(0, 200)
 
   const resolved: ThemePref =
     user.theme === 'system'
@@ -147,6 +135,16 @@ export default function Page() {
     if (user?.theme === 'system' && value === resolved) return
     if (user?.theme === value) return
     void patch({ theme: value })
+  }
+
+  function patchChunk(next: Partial<ChunkPrefs>) {
+    const value = normalizeChunk(next.unit ?? chunk.unit, next.size ?? chunk.size)
+    setChunk(value)
+    writeChunkPrefs(value)
+  }
+
+  function chooseChunkUnit(unit: ChunkUnit) {
+    patchChunk({ unit, size: unit === 'sentences' ? 3 : 1200 })
   }
 
   async function changePassword(event: FormEvent) {
@@ -221,7 +219,7 @@ export default function Page() {
       setLlmKey('')
       notify('Настройки нейросети сохранены')
     } catch (reason) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось сохранить настройки')
+      notifyError(reason instanceof Error ? reason.message : 'Не удалось сохранить настройки')
     } finally {
       setLlmBusy(null)
     }
@@ -254,9 +252,14 @@ export default function Page() {
         body: JSON.stringify({ baseUrl: llmBaseUrl, apiKey: llmKey }),
       })
       setLlmModels(result.models)
-      notify(result.text ?? (result.ok ? 'Список моделей загружен' : 'Не удалось загрузить модели'))
+      if (!result.ok || !result.models.length) {
+        notify(result.text || 'Провайдер не вернул список моделей')
+        return
+      }
+      setModelQuery('')
+      setModelsOpen(true)
     } catch (reason) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось загрузить модели')
+      notifyError(reason instanceof Error ? reason.message : 'Не удалось загрузить модели')
     } finally {
       setLlmBusy(null)
     }
@@ -280,7 +283,7 @@ export default function Page() {
     try {
       setInfo(await systemInfo())
     } catch (reason) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось получить сведения')
+      notifyError(reason instanceof Error ? reason.message : 'Не удалось получить сведения')
     } finally {
       setInfoLoading(false)
     }
@@ -317,7 +320,7 @@ export default function Page() {
       await reloadLlm()
       notify('Настройки нейросети удалены')
     } catch (reason) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось удалить настройки')
+      notifyError(reason instanceof Error ? reason.message : 'Не удалось удалить настройки')
     } finally {
       setLlmBusy(null)
     }
@@ -330,7 +333,7 @@ export default function Page() {
           <ArrowLeft size={22} />
         </button>
         <h1>Настройки аккаунта</h1>
-        <button className="icon-btn" aria-label="Справка о системе" onClick={() => void openInfo()}>
+        <button className="icon-btn" aria-label="Справка" onClick={() => void openInfo()}>
           <Info size={20} />
         </button>
       </header>
@@ -426,6 +429,11 @@ export default function Page() {
             <span className={`small ${llmSettings?.source === 'user' || llmSettings?.source === 'env' ? styles.ok : 'muted'}`}>{llmStatus()}</span>
           </div>
           <p className="small muted" style={{ margin: '6px 0 0' }}>Подходит любой сервис с OpenAI-совместимым API.</p>
+          {llmSettings?.source === 'none' ? (
+            <p className={`small ${styles.warn}`} style={{ margin: '4px 0 0' }}>
+              Без ключа не работают генерация в чате и перевод, а значит и добавление текстов.
+            </p>
+          ) : null}
           <div className="stack" style={{ gap: 10, marginTop: 10 }}>
             <label className="field">
               <span>Провайдер</span>
@@ -450,16 +458,11 @@ export default function Page() {
               <span>Модель</span>
               <input
                 className="input compact"
-                list="llm-models"
                 value={llmModel}
                 placeholder="gpt-4o-mini"
                 onChange={(event) => setLlmModel(event.target.value)}
               />
-              <datalist id="llm-models">
-                {llmModels.map((model) => (
-                  <option key={model} value={model} />
-                ))}
-              </datalist>
+              <span className="muted">Можно вписать вручную или выбрать из списка провайдера</span>
             </label>
             <label className="field">
               <span>API-ключ</span>
@@ -490,7 +493,7 @@ export default function Page() {
             </div>
             <div className={styles.llmActions}>
               <button type="button" className="btn ghost slim" disabled={llmBusy !== null} onClick={() => void loadLlmModels()}>
-                {llmBusy === 'models' ? 'Загружаю…' : 'Загрузить модели'}
+                {llmBusy === 'models' ? 'Запрашиваю…' : 'Выбрать модель'}
               </button>
               <button
                 type="button"
@@ -503,6 +506,38 @@ export default function Page() {
             </div>
             <p className="small muted" style={{ margin: 0 }}>Для локальных моделей ключ не нужен. На Vercel localhost указывает на сервер Vercel, а не на ваш компьютер.</p>
           </div>
+        </div>
+        <div>
+          <strong>Размер блока перевода</strong>
+          <p className="small muted" style={{ margin: '6px 0 0' }}>
+            Сколько текста уходит в нейросеть за один запрос. Меньше — точнее, но больше запросов. Больше — быстрее
+            и дешевле; для хорошей модели качество почти не падает.
+          </p>
+          <div className={styles.seg} style={{ marginTop: 8 }}>
+            <button type="button" className={chunk.unit === 'tokens' ? styles.on : ''} onClick={() => chooseChunkUnit('tokens')}>
+              Токены
+            </button>
+            <button type="button" className={chunk.unit === 'sentences' ? styles.on : ''} onClick={() => chooseChunkUnit('sentences')}>
+              Предложения
+            </button>
+          </div>
+          <div className={styles.rangeRow}>
+            <input
+              className={styles.range}
+              type="range"
+              min={chunk.unit === 'tokens' ? 300 : 1}
+              max={chunk.unit === 'tokens' ? 4000 : 20}
+              step={chunk.unit === 'tokens' ? 100 : 1}
+              value={chunk.size}
+              onChange={(event) => patchChunk({ size: Number(event.target.value) })}
+            />
+            <b>
+              {chunk.size} {chunk.unit === 'tokens' ? 'ток.' : 'предл.'}
+            </b>
+          </div>
+          <p className="small muted" style={{ margin: '4px 0 0' }}>
+            ≈ {requestsPer10k(chunk)} запросов на 10 000 слов. Настройка хранится в этом браузере.
+          </p>
         </div>
         <button
           className="btn ghost slim"
@@ -533,87 +568,72 @@ export default function Page() {
           </div>
         </div>
       ) : null}
-      {infoOpen ? (
-        <div className="modal-dim" onClick={() => setInfoOpen(false)}>
+      {modelsOpen ? (
+        <div className="modal-dim" onClick={() => setModelsOpen(false)}>
           <div
-            className={`modal ${styles.info}`}
+            className={`modal ${styles.models}`}
             role="dialog"
             aria-modal="true"
-            aria-label="Справка о системе"
+            aria-label="Выбор модели"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className={styles.infoHead}>
-              <h2>Справка о системе</h2>
-              <button className="icon-btn" aria-label="Закрыть" onClick={() => setInfoOpen(false)}>
+            <div className={styles.modelHead}>
+              <h2>Выбор модели</h2>
+              <button className="icon-btn" aria-label="Закрыть" onClick={() => setModelsOpen(false)}>
                 <X size={18} />
               </button>
             </div>
-            {infoLoading ? (
-              <p className="muted">Собираю сведения…</p>
-            ) : info ? (
-              <div className={styles.infoBody}>
-                <section>
-                  <h3>Приложение</h3>
-                  <Row label="Версия" value={info.app.version} />
-                  <Row label="Next.js" value={info.app.next} />
-                  <Row label="Node.js" value={info.app.node} />
-                  <Row label="Режим" value={info.app.env} />
-                </section>
-                <section>
-                  <h3>Сервис текстов</h3>
-                  <Row label="Адрес" value={<span className={styles.mono}>{info.service.url}</span>} />
-                  <Row label="Статус" value={info.service.ok ? `Доступен · ${info.service.latencyMs} мс` : 'Недоступен'} />
-                  <Row label="Версия" value={info.service.version ?? '—'} />
-                  <Row
-                    label="Словарь"
-                    value={info.service.lemmas ? `${info.service.lemmas.toLocaleString('ru-RU')} лемм` : '—'}
-                  />
-                </section>
-                <section>
-                  <h3>Нейросеть</h3>
-                  <Row label="Модель" value={llmSettings?.model || '—'} />
-                  <Row label="Ключ" value={llmStatus()} />
-                </section>
-                <section>
-                  <h3>Ваши данные</h3>
-                  <Row label="Уровень" value={user.cefr} />
-                  <Row label="Серия" value={`${user.streak} дн.`} />
-                  <Row label="Слов в словаре" value={info.data.words.toLocaleString('ru-RU')} />
-                  <Row label="Освоено" value={info.data.mastered.toLocaleString('ru-RU')} />
-                  <Row label="Текстов в подборке" value={info.data.texts.toLocaleString('ru-RU')} />
-                  <Row label="Прочитано" value={info.data.read.toLocaleString('ru-RU')} />
-                </section>
-                <section>
-                  <h3>Возможности</h3>
-                  <Row label="Форматы" value="TXT, FB2, EPUB, DOCX, MD, .2books" />
-                  <Row
-                    label="Файл"
-                    value={info.limits ? `до ${Math.round(info.limits.maxUploadBytes / 1024 / 1024)} МБ` : '—'}
-                  />
-                  <Row
-                    label="Текст"
-                    value={info.limits ? `до ${Math.round(info.limits.maxTranslateChars / 1000)} тыс. символов` : '—'}
-                  />
-                  <Row label="Скорость чтения" value="75 слов/мин" />
-                </section>
+            <input
+              className="input compact"
+              autoFocus
+              placeholder="Поиск: openai/, gpt-4o, claude"
+              value={modelQuery}
+              onChange={(event) => setModelQuery(event.target.value)}
+            />
+            <div className={styles.modelCount}>
+              {filteredModels.length} моделей
+              {shownModels.length < filteredModels.length ? ` · показано ${shownModels.length}` : ''}
+            </div>
+            <div className={styles.modelList}>
+              {shownModels.map((model) => (
+                <button
+                  key={model}
+                  type="button"
+                  className={model === llmModel ? `${styles.model} ${styles.modelOn}` : styles.model}
+                  onClick={() => {
+                    setLlmModel(model)
+                    setModelsOpen(false)
+                  }}
+                >
+                  {model}
+                </button>
+              ))}
+              {filteredModels.length ? null : (
                 <p className="small muted" style={{ margin: 0 }}>
-                  Подборка — ваши тексты. Библиотека — опубликованные тексты, видимые другим. Словарь хранит слова и
-                  примеры из текста, тренировка повторяет их по расписанию.
+                  Ничего не найдено
                 </p>
-              </div>
-            ) : (
-              <p className="muted">Не удалось получить сведения.</p>
-            )}
+              )}
+            </div>
+            <p className="small muted" style={{ margin: '8px 0 0' }}>
+              Список приходит от провайдера. Ничего не скачивается.
+            </p>
             <div className="actions">
-              <button className="btn ghost" onClick={copyInfo} disabled={!info}>
-                Скопировать сведения
-              </button>
-              <button className="btn" onClick={() => setInfoOpen(false)}>
+              <button className="btn" onClick={() => setModelsOpen(false)}>
                 Закрыть
               </button>
             </div>
           </div>
         </div>
+      ) : null}
+      {infoOpen ? (
+        <Help
+          info={info}
+          loading={infoLoading}
+          model={llmSettings?.model ?? ''}
+          status={llmStatus()}
+          onCopy={copyInfo}
+          onClose={() => setInfoOpen(false)}
+        />
       ) : null}
     </div>
   )

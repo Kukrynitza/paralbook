@@ -8,3 +8,9 @@
 .bad {
   color: var(--danger);
 }
+
+.grow {
+  min-height: 168px;
+  max-height: 336px;
+  resize: none;
+}

@@ -1,9 +1,10 @@
 'use client'
 
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import logOut from '@/actions/LoginAndSign/LogOut'
 import selectMe from '@/actions/Profile/selectMe'
-import type { User } from '@/sorse/types'
+import type { AlertItem, User } from '@/sorse/types'
+import Alerts from '@/components/Alerts/Alerts'
 import styles from './AuthContext.module.css'
 
 interface AuthValue {
@@ -80,12 +81,16 @@ interface Ask {
 
 const UiContext = createContext<{
   notify: (message: string) => void
+  notifyError: (message: string, options?: { href?: string; linkLabel?: string; timeout?: number }) => void
   confirm: (message: string) => Promise<boolean>
+  hasAlerts: boolean
 } | null>(null)
 
 export function UiProvider({ children }: { children: ReactNode }) {
   const [snack, setSnack] = useState<string | null>(null)
   const [ask, setAsk] = useState<Ask | null>(null)
+  const [alerts, setAlerts] = useState<AlertItem[]>([])
+  const alertTimers = useRef(new Map<string, number>())
 
   useEffect(() => {
     if (!snack) return
@@ -93,20 +98,54 @@ export function UiProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer)
   }, [snack])
 
+  useEffect(() => {
+    const timers = alertTimers.current
+    return () => {
+      for (const timer of timers.values()) window.clearTimeout(timer)
+      timers.clear()
+    }
+  }, [])
+
+  function dismissAlert(id: string) {
+    const timer = alertTimers.current.get(id)
+    if (timer) window.clearTimeout(timer)
+    alertTimers.current.delete(id)
+    setAlerts((current) => current.filter((item) => item.id !== id))
+  }
+
   const value = useMemo(
     () => ({
       notify: (message: string) => setSnack(message),
+      notifyError: (
+        message: string,
+        options: { href?: string; linkLabel?: string; timeout?: number } = {},
+      ) => {
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        setAlerts((current) => {
+          const same = current.find((item) => item.message === message)
+          if (same) {
+            return current.map((item) => (
+              item.id === same.id ? { ...item, href: options.href, linkLabel: options.linkLabel } : item
+            ))
+          }
+          return [...current.slice(-2), { id, message, href: options.href, linkLabel: options.linkLabel }]
+        })
+        const timer = window.setTimeout(() => dismissAlert(id), options.timeout ?? 9000)
+        alertTimers.current.set(id, timer)
+      },
       confirm: (message: string) =>
         new Promise<boolean>((resolve) => {
           setAsk({ message, resolve })
         }),
+      hasAlerts: alerts.length > 0,
     }),
-    [],
+    [alerts.length],
   )
 
   return (
     <UiContext.Provider value={value}>
       {children}
+      <Alerts items={alerts} onClose={dismissAlert} />
       {snack ? <div className={styles.snack}>{snack}</div> : null}
       {ask ? (
         <div className="modal-dim">

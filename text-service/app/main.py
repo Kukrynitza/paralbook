@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
@@ -43,11 +44,32 @@ async def lifespan(_: FastAPI):
         "update text_jobs set status='error', stage='error', progress=100, error='Сервис был перезапущен во время обработки' "
         "where status in ('queued', 'running')"
     )
+    await db.sweep()
     await dictionary.load(db)
     jobs = JobManager(db, dictionary)
     log.info("dictionary loaded: %s", dictionary.stats)
+    sweeper = asyncio.create_task(_sweeper())
     yield
+    sweeper.cancel()
+    await asyncio.gather(sweeper, return_exceptions=True)
+    if jobs:
+        for task in list(jobs.tasks.values()):
+            task.cancel()
+        await asyncio.gather(*jobs.tasks.values(), return_exceptions=True)
     await db.close()
+
+
+async def _sweeper() -> None:
+    while True:
+        try:
+            counts = await db.sweep()
+            if any(counts.values()):
+                log.info("sweep: %s", counts)
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            log.exception("sweep failed")
+        await asyncio.sleep(300)
 
 
 app = FastAPI(title="Paralbook text service", version="1.0.0", lifespan=lifespan)
@@ -74,6 +96,19 @@ def internal_or_user(authorization: str | None, x_service_token: str | None) -> 
     if internal_ok(x_service_token):
         return None, True
     return user_from_auth(authorization), False
+
+
+def chunk_settings(unit: str, size: int) -> tuple[str, int]:
+    value = unit if unit in ("sentences", "tokens") else "tokens"
+    try:
+        number = int(size)
+    except (TypeError, ValueError):
+        number = 1200
+    if value == "sentences":
+        number = max(1, min(20, number))
+    else:
+        number = max(300, min(4000, number))
+    return value, number
 
 
 async def ensure_text_owner(text_id: str, user_id: str) -> dict:
@@ -257,15 +292,19 @@ async def import_file(
     translate: bool = Form(True),
     source: str = Form("upload"),
     language: str = Form("auto"),
+    chunk_unit: str = Form("tokens"),
+    chunk_size: int = Form(1200),
     authorization: str | None = Header(default=None),
 ) -> dict:
     payload = verify_user_token(authorization)
     user_id = str(payload["sub"])
     text_id = str(payload.get("textId") or "")
+    job_id = str(payload.get("jobId") or "") or None
     if not text_id:
         raise HTTPException(status_code=400, detail="В токене нет textId")
     if language not in ("auto", "en", "ru"):
         raise HTTPException(status_code=400, detail="Неизвестный язык книги")
+    unit, size = chunk_settings(chunk_unit, chunk_size)
     await ensure_text_owner(text_id, user_id)
     data = await file.read()
     if not data:
@@ -274,7 +313,8 @@ async def import_file(
         raise HTTPException(status_code=413, detail=f"Файл больше {MAX_UPLOAD_BYTES // 1024 // 1024} МБ")
     assert jobs is not None
     job = await jobs.create_import_job(user_id=user_id, text_id=text_id, filename=file.filename or "file",
-                                       data=data, translate=translate, source=source, language=language)
+                                       data=data, translate=translate, source=source, language=language,
+                                       job_id=job_id, chunk_unit=unit, chunk_size=size)
     return job_view(job)
 
 
@@ -283,6 +323,7 @@ async def import_text(body: TextImportBody, authorization: str | None = Header(d
     payload = verify_user_token(authorization)
     user_id = str(payload["sub"])
     text_id = str(payload.get("textId") or "")
+    job_id = str(payload.get("jobId") or "") or None
     if not text_id:
         raise HTTPException(status_code=400, detail="В токене нет textId")
     english = body.text.strip()
@@ -294,11 +335,13 @@ async def import_text(body: TextImportBody, authorization: str | None = Header(d
             status_code=400,
             detail=f"Лимит — {MAX_TRANSLATE_CHARS:,} символов на текст. Сократите отрывок или загрузите книгу файлом".replace(",", " "),
         )
+    unit, size = chunk_settings(body.chunkUnit, body.chunkSize)
     await ensure_text_owner(text_id, user_id)
     assert jobs is not None
     job = await jobs.create_import_job(user_id=user_id, text_id=text_id, text=english,
                                        russian=russian or None, translate=body.translate,
-                                       source=body.source, language="auto")
+                                       source=body.source, language="auto",
+                                       job_id=job_id, chunk_unit=unit, chunk_size=size)
     return job_view(job)
 
 
@@ -353,8 +396,9 @@ async def cancel_job(job_id: str, authorization: str | None = Header(default=Non
         raise HTTPException(status_code=404, detail="Задание не найдено")
     if not internal and not can_access_job(job, user_id or ""):
         raise HTTPException(status_code=403, detail="Нет доступа")
-    if job["status"] in ("queued", "running"):
-        await db.update_job(job_id, status="cancelled", stage="cancelled", progress=100)
+    if job["status"] in ("queued", "running", "uploading"):
+        assert jobs is not None
+        await jobs.cancel(job_id)
     return {"ok": True}
 
 

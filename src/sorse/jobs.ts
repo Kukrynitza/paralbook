@@ -1,6 +1,6 @@
 import database from '@/modules/database'
 
-const STALE_AFTER_MS = 10 * 60 * 1000
+const STALE_AFTER_MS = 30 * 60 * 1000
 
 export async function activeJobFor(userId: string) {
   const cutoff = new Date(Date.now() - STALE_AFTER_MS)
@@ -8,7 +8,7 @@ export async function activeJobFor(userId: string) {
     .selectFrom('textJobs')
     .select(['id', 'type', 'textId', 'status', 'progress', 'updatedAt'])
     .where('userId', '=', userId)
-    .where('status', 'in', ['queued', 'running'])
+    .where('status', 'in', ['uploading', 'queued', 'running'])
     .where('updatedAt', '>', cutoff)
     .orderBy('createdAt', 'desc')
     .executeTakeFirst()

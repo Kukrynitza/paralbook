@@ -8,12 +8,15 @@ export default async function deleteText(textId: string) {
   if (!id) {
     throw new Error('Нужно войти')
   }
-  const text = await database.selectFrom('texts').select(['id', 'ownerId']).where('id', '=', textId).executeTakeFirst()
+  const text = await database.selectFrom('texts').select(['id', 'ownerId', 'published']).where('id', '=', textId).executeTakeFirst()
   if (!text) {
     throw new Error('Текст не найден')
   }
   if (text.ownerId !== id) {
     throw new Error('Чужой текст удалить нельзя')
+  }
+  if (text.published) {
+    throw new Error('Опубликованный текст нельзя удалить')
   }
   await database.transaction().execute(async (trx) => {
     const pages = await trx.selectFrom('pages').select('id').where('textId', '=', textId).execute()
@@ -26,6 +29,7 @@ export default async function deleteText(textId: string) {
     await trx.deleteFrom('votes').where('textId', '=', textId).execute()
     await trx.deleteFrom('collectionItems').where('textId', '=', textId).execute()
     await trx.deleteFrom('chatMessages').where('textId', '=', textId).execute()
+    await trx.deleteFrom('textJobs').where('textId', '=', textId).execute()
     await trx.deleteFrom('texts').where('id', '=', textId).execute()
   })
 }

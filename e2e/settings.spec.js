@@ -1,0 +1,29 @@
+const { test, expect } = require('@playwright/test')
+
+test('settings loads llm settings from python service', async ({ browser }) => {
+  const context = await browser.newContext({ storageState: 'e2e/.auth/user.json' })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(String(error)))
+  await page.goto('http://localhost:5173/settings')
+  await expect(page.getByText('Нейросеть', { exact: true })).toBeVisible({ timeout: 30000 })
+  await expect(page.getByText(/Свой ключ/)).toBeVisible({ timeout: 30000 })
+  expect(errors).toEqual([])
+  await context.close()
+})
+
+test('model picker searches and selects a model', async ({ browser }) => {
+  const context = await browser.newContext({ storageState: 'e2e/.auth/user.json' })
+  const page = await context.newPage()
+  await page.goto('http://localhost:5173/settings')
+  await page.getByRole('button', { name: 'Выбрать модель' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Выбор модели' })
+  await expect(dialog).toBeVisible({ timeout: 60000 })
+  await dialog.getByPlaceholder(/Поиск/).fill('gpt-4o-mini')
+  const item = dialog.getByRole('button', { name: 'openai/gpt-4o-mini', exact: true })
+  await expect(item).toBeVisible({ timeout: 30000 })
+  await item.click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByLabel('Модель')).toHaveValue('openai/gpt-4o-mini')
+  await context.close()
+})

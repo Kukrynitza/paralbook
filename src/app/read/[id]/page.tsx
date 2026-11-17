@@ -37,6 +37,7 @@ export default function Page() {
   const [loading, setLoading] = useState(false)
   const lineRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const navSeq = useRef(0)
   const current = cache[page]
   const slice = current ? wordTokens(current.ruTokens) : []
   const wordCount = current ? wordTokens(current.tokens).length : 0
@@ -82,8 +83,9 @@ export default function Page() {
   }, [id])
 
   async function go(next: number) {
-    if (!data || loading) return
+    if (!data) return
     const value = Math.max(0, next)
+    const seq = ++navSeq.current
     const cached = cache[value]
     if (cached) {
       setPage(value)
@@ -94,6 +96,7 @@ export default function Page() {
     }
     try {
       const result = await saveProgress(id, value)
+      if (seq !== navSeq.current) return
       setFinished(result.finished)
       if (result.finished) {
         setPage(Math.min(value, data.pageCount - 1))
@@ -102,18 +105,25 @@ export default function Page() {
       const target = result.page
       if (!cache[target]) {
         const payload = await selectText(id, target, 4)
+        if (seq !== navSeq.current) return
         merge(payload)
         setPage(payload.page)
       } else {
         setPage(target)
-        void selectText(id, target, 4).then(merge).catch(() => undefined)
+        void selectText(id, target, 4)
+          .then((payload) => {
+            if (seq === navSeq.current) merge(payload)
+          })
+          .catch(() => undefined)
       }
       setAlong(0)
       setPick(null)
     } catch (reason) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось загрузить страницу')
+      if (seq === navSeq.current) {
+        notify(reason instanceof Error ? reason.message : 'Не удалось загрузить страницу')
+      }
     } finally {
-      setLoading(false)
+      if (seq === navSeq.current) setLoading(false)
     }
   }
 
@@ -265,6 +275,7 @@ export default function Page() {
         page={page + 1}
         pages={data.pageCount}
         jump
+        finishLabel="Завершить"
         prevDisabled={page <= 0 || finished || loading}
         nextDisabled={finished || loading}
         onPage={(next) => {

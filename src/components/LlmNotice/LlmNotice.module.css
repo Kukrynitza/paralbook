@@ -1,0 +1,41 @@
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--danger);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text);
+}
+
+.link {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}

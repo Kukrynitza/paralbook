@@ -18,22 +18,27 @@ export default async function listJobs() {
       'textJobs.progress',
       'textJobs.error',
       'textJobs.createdAt',
+      'textJobs.payload',
       'texts.title',
     ])
     .where('textJobs.userId', '=', id)
-    .where('textJobs.status', 'in', ['queued', 'running', 'error'])
+    .where('textJobs.status', 'in', ['uploading', 'queued', 'running'])
     .orderBy('textJobs.createdAt', 'desc')
     .limit(20)
     .execute()
-  return rows.map((row) => ({
-    id: row.id,
-    textId: row.textId,
-    type: row.type === 'chat' ? ('chat' as const) : ('import' as const),
-    title: row.title ?? 'Текст',
-    status: row.status,
-    stage: row.stage,
-    progress: row.progress,
-    error: row.error,
-    createdAt: new Date(row.createdAt).toISOString(),
-  }))
+  return rows
+    .filter((row) => row.textId)
+    .map((row) => {
+      const payload = (row.payload && typeof row.payload === 'object' ? row.payload : {}) as { title?: string }
+      return {
+        id: row.id,
+        textId: row.textId as string,
+        type: row.type === 'chat' ? ('chat' as const) : ('import' as const),
+        title: row.title ?? payload.title ?? 'Текст',
+        status: row.status,
+        stage: row.stage,
+        progress: row.progress,
+        error: row.error,
+      }
+    })
 }

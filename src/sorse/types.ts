@@ -120,6 +120,13 @@ export interface SystemInfo {
   }
 }
 
+export interface AlertItem {
+  id: string
+  message: string
+  href?: string
+  linkLabel?: string
+}
+
 export interface ChatText {
   id: string
   title: string

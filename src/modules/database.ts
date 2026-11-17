@@ -156,7 +156,7 @@ export interface LlmSettings {
 }
 
 export interface TextJobs {
-  id: GeneratedAlways<string>
+  id: Generated<string>
   userId: string
   textId: string | null
   type: string

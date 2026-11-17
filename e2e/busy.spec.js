@@ -1,0 +1,25 @@
+const { test, expect } = require('@playwright/test')
+
+test.setTimeout(240000)
+
+test('new upload and chat are blocked while a job is running', async ({ browser }) => {
+  const context = await browser.newContext({ storageState: 'e2e/.auth/user.json' })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(String(error)))
+  await page.goto('http://localhost:5173/chat')
+  await page.getByPlaceholder('Тема и время чтения').fill('Busy Lock UI test, 5 минуты')
+  await page.getByRole('button', { name: 'Отправить' }).click()
+  await expect(page.getByText('Busy Lock UI test, 5 минут')).toBeVisible({ timeout: 30000 })
+  await page.goto('http://localhost:5173/text')
+  await expect(page.getByText('Дождитесь завершения текущей задачи', { exact: false })).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('input[type="file"]')).toHaveCount(0)
+  await page.goto('http://localhost:5173/chat')
+  await expect(page.getByText('Новый запрос можно отправить после завершения', { exact: false })).toBeVisible({ timeout: 30000 })
+  await expect(page.getByPlaceholder('Тема и время чтения')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Отменить' }).first().click()
+  await page.getByRole('dialog', { name: 'Остановить генерацию?' }).getByRole('button', { name: 'Остановить' }).click()
+  await expect(page.getByPlaceholder('Тема и время чтения')).toBeVisible({ timeout: 30000 })
+  expect(errors).toEqual([])
+  await context.close()
+})

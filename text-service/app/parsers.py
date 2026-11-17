@@ -33,31 +33,114 @@ class Parsed:
     format: str
     warnings: list[str] = field(default_factory=list)
     pages: list[dict] | None = None
-    russian: str | None = None
 
 
 def normalize_text(text: str) -> str:
-    text = text.replace("\ufeff", "").replace("\x00", "")
+    text = text.replace("\ufeff", "")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
+RUS_LETTERS = set("абвгдеёжзийклмнопрстуфхцчшщъыьэюя")
+RUS_FREQ = "оеаинтсрвлкмдпуяыьгзбчйхжшюцщэфъё"
+RUS_BIGRAMS = (
+    "ст", "но", "то", "на", "ен", "ов", "ни", "ра", "во", "ко", "пр", "ро", "ос", "го",
+    "ер", "ре", "ал", "ли", "ть", "ка", "по", "ти", "ло", "вс", "де", "ит", "за", "из",
+    "ел", "ль", "ан", "ор", "ат", "те", "ла", "бы", "ил", "та", "ет", "да", "ты", "ье",
+    "ьн", "ся", "ий", "ый", "ая", "ое", "ые", "их", "ую", "ем", "ом", "ам", "ах", "ой",
+    "ей", "эт", "чт", "как", "все", "она", "они", "его", "для", "или", "при", "над",
+)
+RUS_WORDS = (
+    "и", "в", "не", "на", "что", "он", "с", "как", "а", "то", "все", "она", "так",
+    "его", "но", "да", "ты", "к", "у", "же", "вы", "за", "бы", "по", "только", "ее",
+    "мне", "было", "вот", "от", "меня", "еще", "нет", "о", "из", "ему", "теперь",
+    "когда", "даже", "ну", "вдруг", "ли", "если", "уже", "или", "ни", "быть", "был",
+    "него", "до", "вас", "нибудь", "опять", "уж", "вам", "ведь", "там", "потом",
+    "себя", "ничего", "ей", "может", "они", "тут", "где", "есть", "надо", "ней",
+    "для", "мы", "тебя", "их", "чем", "была", "сам", "чтоб", "без", "будто", "чего",
+    "раз", "тоже", "себе", "под", "будет", "это", "этот", "эта", "эти", "очень",
+)
+
+
+def _russian_score(text: str) -> float:
+    lower = text.lower()
+    letters = [ch for ch in lower if ch.isalpha()]
+    if not letters:
+        return 0.0
+    cyrillic = sum(1 for ch in letters if ch in RUS_LETTERS)
+    if cyrillic < len(letters) * 0.5:
+        return 0.0
+    score = 0.0
+    for ch in letters:
+        index = RUS_FREQ.find(ch)
+        if index >= 0:
+            score += 1.0 / (index + 1)
+    score += 2.0 * sum(1 for bigram in RUS_BIGRAMS if bigram in lower)
+    words = set(lower.replace("—", " ").replace("–", " ").split())
+    score += 5.0 * sum(1 for word in RUS_WORDS if word in words)
+    return score
+
+
 def decode_bytes(data: bytes) -> str:
-    for encoding in ("utf-8-sig", "utf-8"):
+    if data.startswith(b"\xef\xbb\xbf"):
+        return data.decode("utf-8-sig")
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
         try:
-            return data.decode(encoding)
+            return data.decode("utf-16")
         except UnicodeDecodeError:
+            pass
+    sample = data[:512]
+    if b"\x00" in sample:
+        even = sample[0::2].count(0)
+        odd = sample[1::2].count(0)
+        even_total = max(1, len(sample[0::2]))
+        odd_total = max(1, len(sample[1::2]))
+        if odd / odd_total > 0.3:
+            try:
+                return data.decode("utf-16-le")
+            except UnicodeDecodeError:
+                pass
+        if even / even_total > 0.3:
+            try:
+                return data.decode("utf-16-be")
+            except UnicodeDecodeError:
+                pass
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    declaration = re.search(rb"""encoding\s*=\s*["']([A-Za-z0-9._-]+)["']""", data[:4096], re.IGNORECASE)
+    if declaration:
+        try:
+            return data.decode(declaration.group(1).decode("ascii"))
+        except (LookupError, UnicodeDecodeError):
+            pass
+    best_value = ""
+    best_score = 0.0
+    for encoding in ("cp1251", "koi8-r", "cp866", "mac_cyrillic", "iso8859-5"):
+        try:
+            value = data.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+        score = _russian_score(value)
+        if score > best_score:
+            best_score = score
+            best_value = value
+    if best_score > 0:
+        return best_value
+    best = from_bytes(data).best()
+    if best is not None and best.encoding:
+        try:
+            return str(best)
+        except Exception:
             pass
     try:
         return data.decode("cp1252")
-    except UnicodeDecodeError:
-        pass
-    best = from_bytes(data).best()
-    if best is None:
-        raise ValueError("Не удалось определить кодировку файла")
-    return str(best)
+    except UnicodeDecodeError as exc:
+        raise ValueError("Не удалось определить кодировку файла") from exc
 
 
 def parse_txt(data: bytes) -> Parsed:
@@ -341,3 +424,16 @@ def detect_language(text: str) -> str:
     if not latin and not cyrillic:
         return "en"
     return "ru" if cyrillic > latin else "en"
+
+
+def title_from_text(text: str, limit: int = 60) -> str:
+    clean = re.sub(r"\s+", " ", text or "").strip()
+    if not clean:
+        return ""
+    sentence = re.match(r"^[\s\S]*?[.!?…][\"»']?", clean)
+    value = (sentence.group(0) if sentence else clean).strip().rstrip(" .!?…\"»'")
+    if len(value) <= limit:
+        return value
+    cut = value[:limit + 1]
+    at = cut.rfind(" ")
+    return (cut[:at] if at > 0 else cut[:limit]).rstrip(" ,;:—-") + "…"

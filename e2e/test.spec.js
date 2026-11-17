@@ -1,0 +1,20 @@
+const { test, expect } = require('@playwright/test')
+
+test('text import runs in background and appears in collection', async ({ browser }) => {
+  const context = await browser.newContext({ storageState: 'e2e/.auth/user.json' })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(String(error)))
+  await page.goto('http://localhost:5173/text')
+  await page.getByRole('button', { name: 'Добавить текст вручную' }).click()
+  await page.getByLabel('Название').fill('UI Test Book')
+  await page.getByLabel('Тема').fill('ui-test')
+  await page.getByLabel('Английский текст').fill('Hello world. The sun is bright. My friend is happy. We walk in the park every morning.')
+  await page.getByRole('button', { name: 'Добавить текст' }).click()
+  await expect(page).toHaveURL('http://localhost:5173/', { timeout: 30000 })
+  await expect(page.getByText('UI Test Book')).toBeVisible({ timeout: 120000 })
+  await page.getByText('UI Test Book').first().click()
+  await expect(page.getByText('Hello world.', { exact: false })).toBeVisible({ timeout: 30000 })
+  expect(errors).toEqual([])
+  await context.close()
+})

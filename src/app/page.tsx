@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Pin, Settings } from 'lucide-react'
+import { Pin, Plus, Settings } from 'lucide-react'
 import pinCollection from '@/actions/Collection/pinCollection'
 import publishCollection from '@/actions/Collection/publishCollection'
 import removeFromCollection from '@/actions/Collection/removeFromCollection'
@@ -14,6 +14,7 @@ import { type CollectionItem, type PageResult, type Today } from '@/sorse/types'
 import { useUi } from '@/contexts/AuthContext'
 import { useJobs } from '@/contexts/JobContext'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
+import PublishedBadge from '@/components/PublishedBadge/PublishedBadge'
 import Pager from '@/components/Pager/Pager'
 import Ring from '@/components/Ring/Ring'
 import Stars from '@/components/Stars/Stars'
@@ -113,9 +114,14 @@ export default function Page() {
     <div>
       <header className="header">
         <h1>Подборка</h1>
-        <Link href="/settings" className="icon-btn" aria-label="Настройки">
-          <Settings size={20} />
-        </Link>
+        <div className="gap8">
+          <Link href="/text" className="icon-btn" aria-label="Добавить текст">
+            <Plus size={20} />
+          </Link>
+          <Link href="/settings" className="icon-btn" aria-label="Настройки">
+            <Settings size={20} />
+          </Link>
+        </div>
       </header>
       {error ? <p className="form-error pad">{error}</p> : null}
       {today ? (
@@ -222,6 +228,7 @@ export default function Page() {
                 <span>{(item.progress * 100).toFixed(2)}%</span>
                 <span>{item.minutes} мин · {item.level}</span>
                 <span>{item.topic}</span>
+                {item.published ? <PublishedBadge /> : null}
               </div>
               {item.source === 'chat' && !item.published ? (
                 <div className="actions">

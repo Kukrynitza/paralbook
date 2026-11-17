@@ -48,6 +48,10 @@
   flex: 1;
 }
 
+.notice {
+  padding: 0 16px 10px;
+}
+
 .busy {
   display: flex;
   flex-direction: column;

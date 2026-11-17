@@ -33,6 +33,8 @@ class TextImportBody(BaseModel):
     russian: str | None = None
     translate: bool = True
     source: Literal["upload", "text"] = "text"
+    chunkUnit: Literal["sentences", "tokens"] = "tokens"
+    chunkSize: int = 1200
 
 
 class JobView(BaseModel):

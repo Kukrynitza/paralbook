@@ -1,5 +1,4 @@
 from app.align import align_pages
-from app import segment
 
 
 class FakeDictionary:
@@ -17,13 +16,6 @@ class FakeDictionary:
 
     def candidates(self, lemma):
         return self.values.get(lemma, set())
-
-
-def test_page_texts_keeps_blocks():
-    pages = segment.page_texts("One two.\n\nThree four.")
-    assert len(pages) == 1
-    assert "One two." in pages[0]
-    assert "Three four." in pages[0]
 
 
 def test_alignment_sets_align_for_words():

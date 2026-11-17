@@ -1,6 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
+import CancelButton from '@/components/CancelButton/CancelButton'
 import { statusLabel, useJobs } from '@/contexts/JobContext'
 
 export default function BusyNotice({ title }: { title: string }) {
@@ -23,11 +24,14 @@ export default function BusyNotice({ title }: { title: string }) {
             <span>{busyJob.progress}%</span>
           </div>
           <p className="small muted" style={{ margin: 0 }}>
-            Дождитесь завершения текущей задачи — новые книги и запросы будут доступны после неё.
+            Дождитесь завершения текущей задачи или остановите её — новые книги и запросы станут доступны сразу.
           </p>
-          <button type="button" className="btn ghost slim" onClick={() => router.push('/')}>
-            Вернуться в подборку
-          </button>
+          <div className="actions">
+            <CancelButton job={busyJob} className="btn ghost slim" />
+            <button type="button" className="btn ghost slim" onClick={() => router.push('/')}>
+              Вернуться в подборку
+            </button>
+          </div>
         </div>
       </div>
     </div>

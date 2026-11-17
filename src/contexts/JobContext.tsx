@@ -6,7 +6,7 @@ import listJobs from '@/actions/Jobs/listJobs'
 import pollJob from '@/actions/Jobs/pollJob'
 import { useAuth, useUi } from '@/contexts/AuthContext'
 
-export type JobStatus = 'uploading' | 'queued' | 'running' | 'done' | 'error'
+export type JobStatus = 'uploading' | 'queued' | 'running' | 'done' | 'error' | 'cancelled'
 
 export interface JobState {
   id: string
@@ -17,6 +17,7 @@ export interface JobState {
   stage: string | null
   progress: number
   error: string | null
+  createdAt?: number
   finishedAt?: number
 }
 
@@ -25,7 +26,7 @@ interface JobsValue {
   busyJob: JobState | null
   revision: number
   trackJob: (job: { id: string; textId: string; title: string; type: 'import' | 'chat' }) => void
-  trackUpload: (job: { textId: string; title: string }) => void
+  trackUpload: (job: { id: string; textId: string; title: string }) => void
   updateUpload: (textId: string, progress: number, stage?: string) => void
   removeJob: (id: string) => void
   requestNotifications: () => Promise<void>
@@ -42,6 +43,7 @@ function statusLabel(stage: string | null) {
   if (stage === 'aligning') return 'Выравниваю'
   if (stage === 'saving') return 'Сохраняю'
   if (stage === 'generating') return 'Генерирую'
+  if (stage === 'cancelled') return 'Отменено'
   return 'Обрабатываю'
 }
 
@@ -50,9 +52,13 @@ function readStored(): JobState[] {
     const raw = localStorage.getItem(STORAGE_KEY)
     const value = raw ? JSON.parse(raw) : []
     return Array.isArray(value)
-      ? value
-          .filter((item) => item && item.id && item.status !== 'done' && item.status !== 'error')
-          .map((item) => ({ ...item, type: item.type === 'chat' ? 'chat' : 'import' }))
+      ? value.filter(
+          (item) =>
+            item &&
+            item.id &&
+            !String(item.id).startsWith('local-') &&
+            !['done', 'error', 'cancelled'].includes(item.status),
+        )
       : []
   } catch {
     return []
@@ -75,7 +81,7 @@ function showBrowser(title: string, body: string, textId: string) {
 
 export function JobProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
-  const { notify } = useUi()
+  const { notify, notifyError } = useUi()
   const router = useRouter()
   const [jobs, setJobs] = useState<JobState[]>([])
   const [revision, setRevision] = useState(0)
@@ -95,26 +101,27 @@ export function JobProvider({ children }: { children: ReactNode }) {
       setJobs(readStored())
     }
     let active = true
+    const startedAt = Date.now()
     listJobs()
       .then((rows) => {
         if (!active) return
         setJobs((current) => {
-          const serverTextIds = new Set(rows.map((row) => row.textId).filter(Boolean))
-          const localUploads = current.filter((item) => item.id.startsWith('local-') && !serverTextIds.has(item.textId))
+          const serverIds = new Set(rows.map((row) => row.id))
+          const fresh = current.filter(
+            (item) => !serverIds.has(item.id) && (item.createdAt ?? 0) > startedAt,
+          )
           return [
-            ...localUploads,
-            ...rows
-              .filter((row) => row.textId)
-              .map((row) => ({
-                id: row.id,
-                textId: row.textId as string,
-                type: row.type,
-                title: row.title,
-                status: row.status as JobStatus,
-                stage: row.stage,
-                progress: row.progress,
-                error: row.error,
-              })),
+            ...fresh,
+            ...rows.map((row) => ({
+              id: row.id,
+              textId: row.textId,
+              type: row.type,
+              title: row.title,
+              status: row.status as JobStatus,
+              stage: row.stage,
+              progress: row.progress,
+              error: row.error,
+            })),
           ]
         })
       })
@@ -128,13 +135,13 @@ export function JobProvider({ children }: { children: ReactNode }) {
     if (!user) return
     const timer = window.setInterval(() => {
       for (const job of jobsRef.current) {
-        if (job.id.startsWith('local-') || job.status === 'done') continue
+        if (job.id.startsWith('local-') || job.status === 'done' || job.status === 'cancelled') continue
         if (job.status === 'error' && job.finishedAt) continue
         if (polling.current.has(job.id)) continue
         polling.current.add(job.id)
         pollJob(job.id)
           .then((next) => {
-            const terminal = next.status === 'done' || next.status === 'error'
+            const terminal = next.status === 'done' || next.status === 'error' || next.status === 'cancelled'
             setJobs((current) => current.map((item) => (item.id === job.id ? {
               ...item,
               status: next.status as JobStatus,
@@ -143,16 +150,22 @@ export function JobProvider({ children }: { children: ReactNode }) {
               error: next.error,
               finishedAt: terminal ? Date.now() : item.finishedAt,
             } : item)))
-            if ((next.status === 'done' || next.status === 'error') && !finished.current.has(job.id)) {
+            if (terminal && !finished.current.has(job.id)) {
               finished.current.add(job.id)
               setRevision((value) => value + 1)
               if (next.status === 'done') {
                 const title = job.type === 'chat' ? 'Текст готов' : 'Книга готова'
                 notify(`${title}: ${job.title}`)
                 if (document.visibilityState !== 'visible') showBrowser(title, job.title, job.textId)
+              } else if (next.status === 'cancelled') {
+                notify(job.type === 'chat' ? 'Генерация отменена' : 'Загрузка отменена')
               } else {
                 const message = next.error || 'Не удалось обработать текст'
-                notify(message)
+                if (/ключ|не настроена/i.test(message)) {
+                  notifyError(message, { href: '/settings', linkLabel: 'Указать ключ' })
+                } else {
+                  notifyError(message)
+                }
                 if (document.visibilityState !== 'visible') showBrowser('Ошибка обработки', message, job.textId)
               }
             }
@@ -168,15 +181,17 @@ export function JobProvider({ children }: { children: ReactNode }) {
       }
     }, 1600)
     return () => window.clearInterval(timer)
-  }, [notify, user])
+  }, [notify, notifyError, user])
 
   useEffect(() => {
     if (!user) return
     const timer = window.setInterval(() => {
       setJobs((current) => current.filter((job) => {
-        if (job.status !== 'done' && job.status !== 'error') return true
-        if (!job.finishedAt) return true
-        return Date.now() - job.finishedAt < 9000
+        if (job.status === 'done' || job.status === 'cancelled') {
+          if (!job.finishedAt) return true
+          return Date.now() - job.finishedAt < 9000
+        }
+        return true
       }))
     }, 1000)
     return () => window.clearInterval(timer)
@@ -185,7 +200,13 @@ export function JobProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) return
     try {
-      const active = jobs.filter((job) => !job.id.startsWith('local-') && job.status !== 'done' && job.status !== 'error')
+      const active = jobs.filter(
+        (job) =>
+          !job.id.startsWith('local-') &&
+          job.status !== 'done' &&
+          job.status !== 'error' &&
+          job.status !== 'cancelled',
+      )
       localStorage.setItem(STORAGE_KEY, JSON.stringify(active))
     } catch {
       // localStorage может быть недоступен
@@ -206,15 +227,28 @@ export function JobProvider({ children }: { children: ReactNode }) {
       revision,
       trackJob: ({ id, textId, title, type }) => {
         setJobs((current) => {
-          const withoutLocal = current.filter((item) => item.textId !== textId)
-          if (withoutLocal.some((item) => item.id === id)) return withoutLocal
-          return [...withoutLocal, { id, textId, type, title, status: 'queued', stage: 'queued', progress: 0, error: null }]
+          const existing = current.find((item) => item.id === id || item.textId === textId)
+          if (existing) {
+            return current.map((item) => item.id === existing.id
+              ? {
+                  ...item,
+                  id,
+                  textId,
+                  type,
+                  title,
+                  createdAt: item.createdAt ?? Date.now(),
+                  status: item.status === 'uploading' ? 'queued' : item.status,
+                  stage: item.status === 'uploading' ? 'queued' : item.stage,
+                }
+              : item)
+          }
+          return [...current, { id, textId, type, title, status: 'queued', stage: 'queued', progress: 0, error: null, createdAt: Date.now() }]
         })
       },
-      trackUpload: ({ textId, title }) => {
+      trackUpload: ({ id, textId, title }) => {
         setJobs((current) => {
-          if (current.some((item) => item.textId === textId)) return current
-          return [...current, { id: `local-${textId}`, textId, type: 'import', title, status: 'uploading', stage: 'uploading', progress: 0, error: null }]
+          if (current.some((item) => item.id === id || item.textId === textId)) return current
+          return [...current, { id, textId, type: 'import', title, status: 'uploading', stage: 'uploading', progress: 0, error: null, createdAt: Date.now() }]
         })
       },
       updateUpload: (textId, progress, stage = 'uploading') => {

@@ -116,9 +116,12 @@ export async function cancelTextJob(jobId: string) {
   return (await serviceFetch(`/v1/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' })) as { ok: boolean }
 }
 
-export async function signServiceToken(payload: { userId: string; textId?: string; scope: 'import' | 'llm' }, ttl = '15m') {
+export async function signServiceToken(
+  payload: { userId: string; textId?: string; jobId?: string; scope: 'import' | 'llm' },
+  ttl = '15m',
+) {
   if (!jwtSecret) throw new Error('Не задан TEXT_SERVICE_JWT_SECRET')
-  return new SignJWT({ sub: payload.userId, textId: payload.textId, scope: payload.scope })
+  return new SignJWT({ sub: payload.userId, textId: payload.textId, jobId: payload.jobId, scope: payload.scope })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(ttl)

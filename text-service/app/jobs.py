@@ -7,10 +7,10 @@ from typing import Any
 
 from . import llm, segment
 from .align import align_pages
-from .config import MAX_TRANSLATE_CHARS, MIN_UPLOAD_TEXT
+from .config import MAX_TRANSLATE_CHARS, MIN_UPLOAD_TEXT, WORDS_PER_MINUTE
 from .db import Database
 from .dictionary import Dictionary
-from .parsers import Parsed, detect_language, normalize_text, parse_file, validate_text
+from .parsers import Parsed, detect_language, normalize_text, parse_file, title_from_text, validate_text
 
 log = logging.getLogger("text-service.jobs")
 
@@ -33,47 +33,106 @@ def preview(text: str, limit: int = 180) -> str:
     return (cut[:at] if at > 0 else cut[:limit]).strip() + "…"
 
 
+def require_translation(english: str, russian: str) -> None:
+    if english.strip() and not russian.strip():
+        raise ValueError(
+            "Текст без перевода сохранить нельзя. Введите русский текст или укажите API-ключ в настройках"
+        )
+
+
 class JobManager:
     def __init__(self, db: Database, dictionary: Dictionary) -> None:
         self.db = db
         self.dictionary = dictionary
-        self.tasks: set[asyncio.Task] = set()
+        self.tasks: dict[str, asyncio.Task] = {}
+        self.cancelled: set[str] = set()
 
-    async def _assert_idle(self, user_id: str) -> None:
+    async def _assert_idle(self, user_id: str, exclude: str | None = None) -> None:
         active = await self.db.fetch_one(
-            "select id from text_jobs where user_id=%s and status in ('queued', 'running') "
-            "and updated_at > now() - interval '10 minutes' limit 1",
-            (user_id,),
+            "select id from text_jobs where user_id=%s "
+            "and status in ('uploading', 'queued', 'running') "
+            "and updated_at > now() - interval '30 minutes' "
+            "and (%s::uuid is null or id <> %s::uuid) limit 1",
+            (user_id, exclude, exclude),
         )
         if active:
             raise JobBusy("Дождитесь завершения текущей задачи")
 
+    def _start(self, job_id: str, coro) -> None:
+        task = asyncio.create_task(coro)
+        self.tasks[job_id] = task
+
+        def done(_: asyncio.Task) -> None:
+            self.tasks.pop(job_id, None)
+            self.cancelled.discard(job_id)
+
+        task.add_done_callback(done)
+
+    async def cancel(self, job_id: str) -> None:
+        self.cancelled.add(job_id)
+        task = self.tasks.get(job_id)
+        log.info("cancel %s: task=%s", job_id, bool(task))
+        if task and not task.done():
+            task.cancel()
+            try:
+                await asyncio.wait_for(task, timeout=5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+        await self._update(job_id, status="cancelled", stage="cancelled", progress=100, error="Задание отменено")
+
     async def create_import_job(self, *, user_id: str, text_id: str, filename: str = "",
                                 data: bytes | None = None, text: str | None = None,
                                 russian: str | None = None, translate: bool = True,
-                                source: str = "upload", language: str = "auto") -> dict:
-        await self._assert_idle(user_id)
-        payload = {"filename": filename, "source": source, "translate": translate,
-                   "language": language, "parallel": bool((russian or "").strip())}
-        job = await self.db.create_job(user_id=user_id, text_id=text_id, job_type="import", payload=payload)
-        task = asyncio.create_task(
-            self._run_import(job["id"], user_id, text_id, filename, data, text, russian, translate, source, language)
+                                source: str = "upload", language: str = "auto",
+                                job_id: str | None = None, chunk_unit: str = "tokens",
+                                chunk_size: int = 1200) -> dict:
+        await self._assert_idle(user_id, exclude=job_id)
+        base: dict[str, Any] = {}
+        if job_id:
+            existing = await self.db.get_job(job_id)
+            if existing and isinstance(existing.get("payload"), dict):
+                base = dict(existing["payload"])
+        payload = {
+            **base,
+            "filename": filename,
+            "source": source,
+            "translate": translate,
+            "language": language,
+            "parallel": bool((russian or "").strip()),
+            "chunkUnit": chunk_unit,
+            "chunkSize": chunk_size,
+        }
+        if text:
+            payload["text"] = text[:MAX_TRANSLATE_CHARS]
+        if russian:
+            payload["russian"] = russian[:MAX_TRANSLATE_CHARS]
+        if job_id:
+            job = await self.db.claim_job(job_id, user_id, payload)
+            if not job or str(job.get("text_id") or "") != text_id:
+                raise JobBusy("Задача уже неактуальна. Начните загрузку заново")
+        else:
+            job = await self.db.create_job(user_id=user_id, text_id=text_id, job_type="import", payload=payload)
+        current_id = str(job["id"])
+        self._start(
+            current_id,
+            self._run_import(current_id, user_id, text_id, filename, data, text, russian,
+                             translate, source, language, chunk_unit, chunk_size),
         )
-        self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
         return job
 
     async def create_chat_job(self, *, user_id: str, text_id: str, topic: str, minutes: int, level: str) -> dict:
         await self._assert_idle(user_id)
         payload = {"topic": topic, "minutes": minutes, "level": level}
         job = await self.db.create_job(user_id=user_id, text_id=text_id, job_type="chat", payload=payload)
-        task = asyncio.create_task(self._run_chat(job["id"], user_id, text_id, topic, minutes, level))
-        self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
+        current_id = str(job["id"])
+        self._start(current_id, self._run_chat(current_id, user_id, text_id, topic, minutes, level))
         return job
 
     async def _update(self, job_id: str, progress: int | None = None, stage: str | None = None,
                       status: str | None = None, error: str | None = None, result: dict | None = None) -> None:
+        if job_id in self.cancelled and status != "cancelled":
+            log.info("skip update %s: %s", job_id, status)
+            return
         fields: dict[str, Any] = {}
         if progress is not None:
             fields["progress"] = progress
@@ -88,9 +147,31 @@ class JobManager:
         if fields:
             await self.db.update_job(job_id, **fields)
 
+    async def _heartbeat(self, job_id: str) -> None:
+        try:
+            while True:
+                await asyncio.sleep(30)
+                await self.db.touch_job(job_id)
+        except asyncio.CancelledError:
+            return
+
+    @staticmethod
+    def friendly_error(exc: Exception) -> str:
+        if isinstance(exc, UnicodeDecodeError):
+            return "Не удалось определить кодировку файла"
+        if isinstance(exc, (ValueError, JobBusy, llm.LlmError)):
+            return str(exc) or "Не удалось обработать текст"
+        return "Не удалось обработать текст. Попробуйте ещё раз"
+
+    def _abort_if_cancelled(self, job_id: str) -> None:
+        if job_id in self.cancelled:
+            raise asyncio.CancelledError
+
     async def _run_import(self, job_id: str, user_id: str, text_id: str, filename: str,
                           data: bytes | None, text: str | None, russian: str | None,
-                          translate: bool, source: str, language: str) -> None:
+                          translate: bool, source: str, language: str,
+                          chunk_unit: str = "tokens", chunk_size: int = 1200) -> None:
+        heartbeat = asyncio.create_task(self._heartbeat(job_id))
         try:
             await self._update(job_id, status="running", stage="parsing", progress=10)
             parsed: Parsed | None = None
@@ -99,7 +180,6 @@ class JobManager:
             if data is not None:
                 parsed = parse_file(filename, data, self.dictionary)
                 english = parsed.text
-                russian_text = parsed.russian or ""
             else:
                 raw_english = (text or "").strip()
                 raw_russian = (russian or "").strip()
@@ -116,9 +196,14 @@ class JobManager:
             if parsed and parsed.pages is not None:
                 pages = parsed.pages
                 words = sum(1 for page in pages for item in page["en"] if item["text"].strip())
-                minutes = max(1, round(words / 120))
+                minutes = max(1, round(words / WORDS_PER_MINUTE))
                 current_title = (text_row.get("title") or "").strip()
-                title = parsed.title if parsed.title and current_title in ("", "Своя книга", "Свой текст") else current_title
+                fallback_title = parsed.title or title_from_text(parsed.text or "")
+                title = (
+                    fallback_title
+                    if fallback_title and current_title in ("", "Своя книга", "Свой текст", "Книга")
+                    else current_title
+                )
                 await self.db.write_pages(
                     text_id,
                     pages,
@@ -128,10 +213,9 @@ class JobManager:
                 )
                 await self._update(job_id, status="done", stage="done", progress=100, result={
                     "pages": len(pages), "words": words, "minutes": minutes, "format": parsed.format,
-                    "translationSkipped": False, "warnings": parsed.warnings,
+                    "warnings": parsed.warnings,
                 })
                 return
-            skipped = False
             detected = language if language in ("en", "ru") else detect_language(english or russian_text)
 
             async def progress(value_: int) -> None:
@@ -148,7 +232,10 @@ class JobManager:
                     raise ValueError("Для русского текста нужен перевод на английский")
                 await self._update(job_id, stage="translating", progress=30)
                 config = await llm.load_config(self.db, user_id)
-                english = await llm.translate_text(config, russian_text, progress=progress, direction="ru-en")
+                english = await llm.translate_text(
+                    config, russian_text, progress=progress, direction="ru-en",
+                    unit=chunk_unit, size=chunk_size,
+                )
             elif english and translate:
                 if detected == "ru":
                     if len(english) > MAX_TRANSLATE_CHARS:
@@ -159,42 +246,69 @@ class JobManager:
                     await self._update(job_id, stage="translating", progress=30)
                     config = await llm.load_config(self.db, user_id)
                     russian_text = english
-                    english = await llm.translate_text(config, russian_text, progress=progress, direction="ru-en")
+                    english = await llm.translate_text(
+                        config, russian_text, progress=progress, direction="ru-en",
+                        unit=chunk_unit, size=chunk_size,
+                    )
                 elif len(english) <= MAX_TRANSLATE_CHARS:
                     await self._update(job_id, stage="translating", progress=30)
                     config = await llm.load_config(self.db, user_id)
-                    russian_text = await llm.translate_text(config, english, progress=progress, direction="en-ru")
+                    russian_text = await llm.translate_text(
+                        config, english, progress=progress, direction="en-ru",
+                        unit=chunk_unit, size=chunk_size,
+                    )
                 else:
-                    skipped = True
+                    raise ValueError(
+                        f"Текст длиннее {MAX_TRANSLATE_CHARS:,} символов — автоматический перевод недоступен. ".replace(",", " ")
+                        + "Разбейте книгу на части или загрузите .2books с готовым переводом"
+                    )
+            self._abort_if_cancelled(job_id)
             if not english.strip():
                 raise ValueError("Не удалось получить английский текст")
+            require_translation(english, russian_text)
             english = validate_text(english)
             await self._update(job_id, stage="aligning", progress=85)
             pages = align_pages(english, russian_text, self.dictionary)
+            self._abort_if_cancelled(job_id)
             words = segment.word_count(english)
-            minutes = max(1, round(words / 120))
+            minutes = max(1, round(words / WORDS_PER_MINUTE))
             current_title = (text_row.get("title") or "").strip()
-            title = parsed.title if parsed and parsed.title and current_title in ("", "Своя книга", "Свой текст") else None
+            fallback_title = (parsed.title if parsed and parsed.title else "") or title_from_text(english)
+            title = (
+                fallback_title
+                if fallback_title and current_title in ("", "Своя книга", "Свой текст", "Книга")
+                else None
+            )
             excerpt = preview(english) or None
             await self._update(job_id, stage="saving", progress=92)
             await self.db.write_pages(text_id, pages, minutes=minutes, title=title, excerpt=excerpt)
+            self._abort_if_cancelled(job_id)
             await self._update(job_id, status="done", stage="done", progress=100, result={
                 "pages": len(pages), "words": words, "minutes": minutes,
                 "format": parsed.format if parsed else ("text" if source == "text" else "txt"),
-                "translationSkipped": skipped, "warnings": parsed.warnings if parsed else [],
+                "warnings": parsed.warnings if parsed else [],
             })
+        except asyncio.CancelledError:
+            await self._update(job_id, status="cancelled", stage="cancelled", progress=100, error="Задание отменено")
+            raise
         except Exception as exc:
             log.exception("import job failed")
-            await self._update(job_id, status="error", stage="error", progress=100, error=str(exc) or "Ошибка обработки")
+            await self._update(job_id, status="error", stage="error", progress=100, error=self.friendly_error(exc))
+        finally:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
 
     async def _run_chat(self, job_id: str, user_id: str, text_id: str, topic: str, minutes: int, level: str) -> None:
+        heartbeat = asyncio.create_task(self._heartbeat(job_id))
         try:
             await self._update(job_id, status="running", stage="generating", progress=5)
             async def progress(value: int) -> None:
                 await self._update(job_id, progress=max(5, min(80, value)))
             generated = await llm.generate_chat_text(self.db, user_id, topic, minutes, level, progress=progress)
+            self._abort_if_cancelled(job_id)
             await self._update(job_id, stage="aligning", progress=85)
             pages = align_pages(generated["english"], generated["russian"], self.dictionary)
+            self._abort_if_cancelled(job_id)
             await self._update(job_id, stage="saving", progress=92)
             await self.db.write_pages(
                 text_id,
@@ -203,10 +317,17 @@ class JobManager:
                 title=generated["title"],
                 excerpt=preview(generated["english"]),
             )
+            self._abort_if_cancelled(job_id)
             await self._update(job_id, status="done", stage="done", progress=100, result={
                 "pages": len(pages), "words": segment.word_count(generated["english"]),
                 "minutes": generated["minutes"], "title": generated["title"],
             })
+        except asyncio.CancelledError:
+            await self._update(job_id, status="cancelled", stage="cancelled", progress=100, error="Задание отменено")
+            raise
         except Exception as exc:
             log.exception("chat job failed")
-            await self._update(job_id, status="error", stage="error", progress=100, error=str(exc) or "Модель не ответила")
+            await self._update(job_id, status="error", stage="error", progress=100, error=self.friendly_error(exc))
+        finally:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)

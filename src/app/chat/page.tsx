@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { maxValue, minLength, minValue, number, picklist, pipe, safeParse, string, trim } from 'valibot'
 import deleteChatMessage from '@/actions/Chat/deleteChatMessage'
@@ -10,11 +10,14 @@ import syncChatJobs from '@/actions/Chat/syncChatJobs'
 import selectCollection from '@/actions/Collection/selectCollection'
 import publishCollection from '@/actions/Collection/publishCollection'
 import deleteText from '@/actions/Reading/deleteText'
-import { LEVELS, type Cefr, type ChatMessage } from '@/sorse/types'
+import { LEVELS, type Cefr, type ChatMessage, type LlmSettingsView } from '@/sorse/types'
 import { useAuth, useUi } from '@/contexts/AuthContext'
 import { statusLabel, useJobs } from '@/contexts/JobContext'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
+import PublishedBadge from '@/components/PublishedBadge/PublishedBadge'
+import LlmNotice from '@/components/LlmNotice/LlmNotice'
 import { preview } from '@/sorse/preview'
+import { readLlmSettings } from '@/sorse/llmClient'
 import styles from './page.module.css'
 
 const topicSchema = pipe(string(), trim(), minLength(1, 'Напишите тему'))
@@ -40,7 +43,7 @@ function pick<T>(items: readonly T[]) {
 
 export default function Page() {
   const { user } = useAuth()
-  const { confirm, notify } = useUi()
+  const { confirm, notify, notifyError } = useUi()
   const { trackJob, jobs, revision, busyJob } = useJobs()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
@@ -50,6 +53,28 @@ export default function Page() {
   const [activeJob, setActiveJob] = useState<string | null>(null)
   const [publishingId, setPublishingId] = useState<string | null>(null)
   const [publishBusy, setPublishBusy] = useState(false)
+  const [llm, setLlm] = useState<LlmSettingsView | null | undefined>(undefined)
+  const seenJob = useRef(false)
+
+  useEffect(() => {
+    let active = true
+    readLlmSettings().then((value) => {
+      if (active) setLlm(value)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const noKey = llm !== undefined && llm !== null && llm.source === 'none'
+  const serviceDown = llm === null
+
+  async function translationState() {
+    if (llm !== undefined) return llm
+    const value = await readLlmSettings()
+    setLlm(value)
+    return value
+  }
 
   async function load() {
     const data = await selectChat()
@@ -69,12 +94,25 @@ export default function Page() {
   }, [])
 
   useEffect(() => {
-    if (!activeJob) return
+    if (!activeJob) {
+      seenJob.current = false
+      return
+    }
     const job = jobs.find((item) => item.id === activeJob)
-    if (!job) return
+    if (!job) {
+      if (!seenJob.current) return
+      seenJob.current = false
+      setActiveJob(null)
+      setPending(false)
+      setProgress(0)
+      setStage('')
+      return
+    }
+    seenJob.current = true
     setProgress(job.progress)
     setStage(job.stage ?? '')
     if (job.status === 'done' || job.status === 'error') {
+      seenJob.current = false
       setActiveJob(null)
       setPending(false)
       setProgress(0)
@@ -97,6 +135,15 @@ export default function Page() {
     if (!clean || !user) return
     if (busyJob) {
       notify('Дождитесь завершения текущей задачи')
+      return
+    }
+    const state = await translationState()
+    if (state === null) {
+      notifyError('Сервис обработки текста недоступен. Попробуйте позже.')
+      return
+    }
+    if (state.source === 'none') {
+      notifyError('Без API-ключа нельзя сгенерировать текст', { href: '/settings', linkLabel: 'Указать ключ' })
       return
     }
     const parsedMinutes = askedMinutes(clean) ?? minutes ?? pick(DURATIONS)
@@ -137,7 +184,7 @@ export default function Page() {
       setActiveJob(job.jobId)
       await load()
     } catch (reason) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось')
+      notifyError(reason instanceof Error ? reason.message : 'Не удалось')
       setPending(false)
       setProgress(0)
       setStage('')
@@ -152,7 +199,7 @@ export default function Page() {
       await deleteChatMessage(messageId)
       await load()
     } catch (reason) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось удалить')
+      notifyError(reason instanceof Error ? reason.message : 'Не удалось удалить')
     }
   }
 
@@ -163,7 +210,7 @@ export default function Page() {
       await deleteText(textId)
       await load()
     } catch (reason) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось удалить')
+      notifyError(reason instanceof Error ? reason.message : 'Не удалось удалить')
     }
   }
 
@@ -179,7 +226,7 @@ export default function Page() {
       await load()
       notify('Текст опубликован')
     } catch (reason) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось опубликовать')
+      notifyError(reason instanceof Error ? reason.message : 'Не удалось опубликовать')
     } finally {
       setPublishBusy(false)
     }
@@ -213,6 +260,11 @@ export default function Page() {
             return (
               <div className={`card ${styles.alarm}`} key={message.id}>
                 <p className={styles.alarmText}>{message.text}</p>
+                {/ключ|не настроена/i.test(message.text) ? (
+                  <Link className="btn ghost" style={{ marginTop: 8 }} href="/settings">
+                    Указать ключ
+                  </Link>
+                ) : null}
                 <button className="btn" style={{ marginTop: 16 }} onClick={() => send(message.retry.topic, message.retry.minutes, message.retry.level)}>
                   Повторить
                 </button>
@@ -226,20 +278,23 @@ export default function Page() {
               <h3>{card.title}</h3>
               <p>{preview(card.excerpt)}</p>
               <div className="meta">
-                {card.minutes} мин · {card.level}
+                <span>{card.minutes} мин · {card.level}</span>
+                {card.published ? <PublishedBadge /> : null}
               </div>
               <div className="actions">
                 <Link className="btn slim" href={`/read/${card.id}`}>
                   Читать
                 </Link>
                 {card.published ? null : (
-                  <button className="btn ghost wrap" onClick={() => setPublishingId(card.id)}>
-                    Опубликовать в библиотеку
-                  </button>
+                  <>
+                    <button className="btn ghost wrap" onClick={() => setPublishingId(card.id)}>
+                      Опубликовать в библиотеку
+                    </button>
+                    <button className="btn danger slim" onClick={() => remove(card.id)}>
+                      Удалить
+                    </button>
+                  </>
                 )}
-                <button className="btn danger slim" onClick={() => remove(card.id)}>
-                  Удалить
-                </button>
               </div>
             </article>
           )
@@ -251,6 +306,15 @@ export default function Page() {
           </div>
         ) : null}
       </div>
+      {noKey ? (
+        <div className={styles.notice}>
+          <LlmNotice kind="key" />
+        </div>
+      ) : serviceDown ? (
+        <div className={styles.notice}>
+          <LlmNotice kind="service" />
+        </div>
+      ) : null}
       {busyJob ? (
         <div className={styles.busy}>
           <strong>Сейчас выполняется: {busyJob.title}</strong>
@@ -260,7 +324,7 @@ export default function Page() {
             <span>{busyJob.progress}%</span>
           </div>
           <p className="small muted" style={{ margin: 0 }}>
-            Новый запрос можно отправить после завершения. Можно уйти — прогресс останется внизу.
+            Новый запрос можно отправить после завершения. Можно уйти — прогресс останется внизу, там же можно отменить.
           </p>
         </div>
       ) : (

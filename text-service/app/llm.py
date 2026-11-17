@@ -178,17 +178,40 @@ async def chat_completion(config: LlmConfig, system: str, user: str, *, max_toke
         payload["max_tokens"] = max_tokens
     own_client = client is None
     http_client = client or httpx.AsyncClient(timeout=timeout or LLM_TIMEOUT_SECONDS)
+    response: httpx.Response | None = None
     try:
-        response = await http_client.post(chat_endpoint(config.base_url), headers=headers, json=payload)
-    except httpx.TimeoutException as exc:
-        raise LlmError("Сервер модели не ответил вовремя", "timeout") from exc
-    except httpx.HTTPError as exc:
-        raise LlmError("Не удалось подключиться к серверу модели", "network") from exc
+        for attempt in range(3):
+            try:
+                response = await http_client.post(chat_endpoint(config.base_url), headers=headers, json=payload)
+            except httpx.TimeoutException as exc:
+                if attempt == 2:
+                    raise LlmError("Сервер модели не ответил вовремя", "timeout") from exc
+                await asyncio.sleep(2 ** attempt)
+                continue
+            except httpx.HTTPError as exc:
+                if attempt == 2:
+                    raise LlmError("Не удалось подключиться к серверу модели", "network") from exc
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                delay = 2 ** attempt
+                retry_after = response.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        delay = min(30, max(1, int(retry_after)))
+                    except ValueError:
+                        pass
+                log.info("llm retry %s after %.1fs: %s", attempt + 1, delay, response.status_code)
+                await asyncio.sleep(delay)
+                continue
+            break
+        if response is None:
+            raise LlmError("Сервер модели не ответил", "network")
+        if response.status_code >= 400:
+            raise _response_error(response.status_code, response.text)
     finally:
         if own_client:
             await http_client.aclose()
-    if response.status_code >= 400:
-        raise _response_error(response.status_code, response.text)
     try:
         data = response.json()
     except Exception as exc:
@@ -300,36 +323,56 @@ async def generate_chat_text(db: Database, user_id: str, topic: str, minutes: in
     }
 
 
-def _translation_blocks(text: str) -> list[str]:
-    blocks = segment.split_blocks(text)
-    result = []
-    for block in blocks or [text]:
-        if len(block) <= TRANSLATE_BLOCK_CHARS:
-            result.append(block)
+def _estimate_tokens(text: str, direction: str) -> int:
+    per_char = 4 if direction == "en-ru" else 3
+    return max(1, round(len(text) / per_char))
+
+
+def _translation_blocks(text: str, unit: str = "tokens", size: int = 1200,
+                        direction: str = "en-ru") -> list[tuple[int, str]]:
+    unit = unit if unit in ("sentences", "tokens") else "tokens"
+    size = max(1, int(size or 1200))
+    block_list = segment.split_blocks(text) or [text]
+    result: list[tuple[int, str]] = []
+    for block_index, block in enumerate(block_list):
+        sentences = segment.split_sentences(block) or [block]
+        if unit == "sentences":
+            step = max(1, min(20, size))
+            for start in range(0, len(sentences), step):
+                chunk = " ".join(sentences[start:start + step]).strip()
+                if chunk:
+                    result.append((block_index, chunk))
             continue
-        current = ""
-        for sentence in segment.split_sentences(block):
-            if current and len(current) + len(sentence) > TRANSLATE_BLOCK_CHARS:
-                result.append(current.strip())
-                current = sentence
+        current: list[str] = []
+        tokens = 0
+        limit = max(300, min(4000, size))
+        for sentence in sentences:
+            estimate = _estimate_tokens(sentence, direction)
+            too_long = current and (tokens + estimate > limit or len(" ".join(current)) >= TRANSLATE_BLOCK_CHARS)
+            if too_long:
+                result.append((block_index, " ".join(current).strip()))
+                current = [sentence]
+                tokens = estimate
             else:
-                current = f"{current} {sentence}".strip()
+                current.append(sentence)
+                tokens += estimate
         if current:
-            result.append(current.strip())
-    return [item for item in result if item]
+            result.append((block_index, " ".join(current).strip()))
+    return [(index, chunk) for index, chunk in result if chunk]
 
 
-async def translate_text(config: LlmConfig, text: str, progress=None, direction: str = "en-ru") -> str:
-    blocks = _translation_blocks(text)
-    if not blocks:
+async def translate_text(config: LlmConfig, text: str, progress=None, direction: str = "en-ru",
+                         unit: str = "tokens", size: int = 1200) -> str:
+    chunks = _translation_blocks(text, unit, size, direction)
+    if not chunks:
         return ""
     if direction == "ru-en":
         system = ("Переведи русский текст на английский язык. Сохраняй абзацы и смысл. "
-                  "Верни только перевод, без пояснений, кавычек и markdown.")
+                  "Не добавляй и не убирай предложения. Верни только перевод, без пояснений, кавычек и markdown.")
     else:
         system = ("Переведи английский текст на русский язык. Сохраняй абзацы и смысл. "
-                  "Верни только перевод, без пояснений, кавычек и markdown.")
-    out: list[str | None] = [None] * len(blocks)
+                  "Не добавляй и не убирай предложения. Верни только перевод, без пояснений, кавычек и markdown.")
+    out: list[str | None] = [None] * len(chunks)
     semaphore = asyncio.Semaphore(max(1, TRANSLATE_CONCURRENCY))
     completed = 0
 
@@ -339,20 +382,25 @@ async def translate_text(config: LlmConfig, text: str, progress=None, direction:
                 value = await chat_completion(config, system, block, temperature=0.2, client=client)
                 return index, value.strip().strip("`")
 
-        tasks = [asyncio.create_task(translate_one(index, block)) for index, block in enumerate(blocks)]
+        tasks = [asyncio.create_task(translate_one(index, block)) for index, (_, block) in enumerate(chunks)]
         try:
             for future in asyncio.as_completed(tasks):
                 index, value = await future
                 out[index] = value
                 completed += 1
                 if progress:
-                    await progress(30 + round(50 * completed / len(blocks)))
-        except Exception:
+                    await progress(30 + round(50 * completed / len(chunks)))
+        except BaseException:
             for task in tasks:
                 if not task.done():
                     task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             raise
-    return "\n\n".join(item or "" for item in out).strip()
+
+    blocks: dict[int, list[str]] = {}
+    for (block_index, _), value in zip(chunks, out):
+        blocks.setdefault(block_index, []).append((value or "").strip())
+    return "\n\n".join(" ".join(part for part in parts if part) for _, parts in sorted(blocks.items())).strip()
 
 
 async def list_models(config: LlmConfig) -> list[str]:

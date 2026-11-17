@@ -27,6 +27,19 @@
   opacity: 0.4;
 }
 
+.pager .finish {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 122px;
+  padding: 0 14px;
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+}
+
 .jump {
   display: flex;
   align-items: center;

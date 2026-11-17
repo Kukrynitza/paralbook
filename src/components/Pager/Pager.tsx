@@ -1,5 +1,6 @@
 'use client'
 
+import { Check } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import styles from './Pager.module.css'
 
@@ -19,6 +20,7 @@ export default function Pager({
   prevDisabled,
   nextDisabled,
   jump,
+  finishLabel,
 }: {
   page: number
   pages: number
@@ -27,6 +29,7 @@ export default function Pager({
   prevDisabled?: boolean
   nextDisabled?: boolean
   jump?: boolean
+  finishLabel?: string
 }) {
   const labels = pageWindow(page, pages)
   const backOff = prevDisabled ?? page <= 1
@@ -58,9 +61,21 @@ export default function Pager({
           {item}
         </button>
       ))}
-      <button type="button" disabled={forwardOff} onClick={() => onPage(page + 1)} aria-label="Дальше">
-        →
-      </button>
+      {page >= pages && finishLabel ? (
+        <button
+          type="button"
+          className={styles.finish}
+          disabled={nextDisabled}
+          onClick={() => onPage(page + 1)}
+        >
+          <Check size={15} />
+          {finishLabel}
+        </button>
+      ) : (
+        <button type="button" disabled={forwardOff} onClick={() => onPage(page + 1)} aria-label="Дальше">
+          →
+        </button>
+      )}
       {jump && pages > 1 ? (
         <form
           className={styles.jump}

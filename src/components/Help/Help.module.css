@@ -1,0 +1,177 @@
+.modal {
+  max-width: 560px;
+  max-height: 86vh;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.head h2 {
+  margin: 0;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 8px;
+}
+
+.body {
+  overflow-y: auto;
+  margin: 0 0 16px;
+  padding-right: 2px;
+}
+
+.guide {
+  display: flex;
+  flex-direction: column;
+}
+
+.block {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 0;
+}
+
+.block:first-child {
+  padding-top: 2px;
+}
+
+.block:last-child {
+  border-bottom: 0;
+}
+
+.block summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  list-style: none;
+}
+
+.block summary::-webkit-details-marker {
+  display: none;
+}
+
+.block summary::after {
+  content: '+';
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.block[open] summary::after {
+  content: '−';
+}
+
+.blockBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.blockBody p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.steps li + li {
+  margin-top: 5px;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.list b {
+  font-weight: 600;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.row span {
+  color: var(--muted);
+}
+
+.row b {
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.footer {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.footer a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.footer a:hover {
+  text-decoration: underline;
+}
+
+.system {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.system section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.system h3 {
+  margin: 0 0 2px;
+  color: var(--word);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}

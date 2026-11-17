@@ -16,10 +16,39 @@ interface ChatPayload {
 export default async function pollJob(jobId: string) {
   const id = await userId()
   if (!id) throw new Error('Нужно войти')
-  const job = await getTextJob(jobId)
+  let job
+  try {
+    job = await getTextJob(jobId)
+  } catch (reason) {
+    const message = reason instanceof Error ? reason.message : ''
+    if (message.includes('не найдено')) {
+      await database.deleteFrom('textJobs').where('id', '=', jobId).where('userId', '=', id).execute()
+      return {
+        id: jobId,
+        userId: id,
+        type: 'import' as const,
+        status: 'cancelled' as const,
+        stage: 'cancelled',
+        progress: 100,
+        textId: null,
+        error: 'Задание отменено',
+        payload: null,
+        result: null,
+      }
+    }
+    throw reason
+  }
   if (job.userId !== id) throw new Error('Нет доступа к заданию')
 
-  if (job.status === 'error' || job.status === 'cancelled') {
+  if (job.status === 'cancelled') {
+    if (job.textId) {
+      await cancelImport(job.textId)
+    }
+    await database.deleteFrom('textJobs').where('id', '=', jobId).where('userId', '=', id).execute()
+    return { ...job, status: 'cancelled' as const, error: job.error || 'Задание отменено' }
+  }
+
+  if (job.status === 'error') {
     if (job.type === 'chat') {
       if (job.textId) await deleteText(job.textId).catch(() => undefined)
       const payload = (job.payload && typeof job.payload === 'object' ? job.payload : {}) as ChatPayload
@@ -46,10 +75,16 @@ export default async function pollJob(jobId: string) {
           })
           .execute()
       }
+      await database.deleteFrom('textJobs').where('id', '=', jobId).where('userId', '=', id).execute()
     } else if (job.textId) {
-      await cancelImport(job.textId)
+      await database
+        .updateTable('textJobs')
+        .set({ textId: null })
+        .where('id', '=', jobId)
+        .where('userId', '=', id)
+        .execute()
+      await deleteText(job.textId).catch(() => undefined)
     }
-    await database.deleteFrom('textJobs').where('id', '=', jobId).where('userId', '=', id).execute()
     return { ...job, status: 'error' as const, error: job.error || 'Не удалось обработать текст' }
   }
 
