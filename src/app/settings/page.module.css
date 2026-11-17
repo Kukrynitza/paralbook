@@ -8,7 +8,7 @@
 
 .seg button {
   flex: 1;
-  height: 34px;
+  height: 32px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -52,16 +52,6 @@
 
 .bad {
   color: var(--danger);
-}
-
-.llmActions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.llmActions .btn {
-  flex: 1;
 }
 
 .warn {
@@ -138,4 +128,215 @@
 .range {
   flex: 1;
   accent-color: var(--accent);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.cardIcon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--card-soft, var(--accent-soft));
+  color: var(--card-ink, var(--accent));
+}
+
+.cardTitle {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cardSummary {
+  margin-left: auto;
+  max-width: 50%;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chev {
+  flex: none;
+  color: var(--muted);
+  transition: transform 150ms ease;
+}
+
+.chevOn {
+  transform: rotate(180deg);
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.orange {
+  --card-soft: rgba(255, 98, 41, 0.14);
+  --card-ink: #ff6229;
+}
+
+.blue {
+  --card-soft: rgba(59, 130, 246, 0.15);
+  --card-ink: #3b82f6;
+}
+
+.purple {
+  --card-soft: rgba(139, 92, 246, 0.16);
+  --card-ink: #8b5cf6;
+}
+
+.green {
+  --card-soft: rgba(34, 160, 107, 0.15);
+  --card-ink: #22a06b;
+}
+
+.pink {
+  --card-soft: rgba(236, 72, 153, 0.15);
+  --card-ink: #ec4899;
+}
+
+.slate {
+  --card-soft: rgba(100, 116, 139, 0.16);
+  --card-ink: #64748b;
+}
+
+.modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.appearanceRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dots {
+  display: flex;
+  gap: 4px;
+}
+
+.dots i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+
+.actionsRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.actionsRow :global(.btn) {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0 14px;
+}
+
+.actionsRow :global(.btn).dangerLink {
+  color: var(--danger);
+}
+
+.accountRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.accountRow b {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.labelMuted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.segSmall {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--input);
+  border-radius: 8px;
+}
+
+.segSmall button {
+  width: 34px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.segSmall .on {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.fontSample {
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.fontSample b {
+  font-size: 16px;
+}
+
+.fontSample p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.logoutRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+}
+
+.logoutRow p {
+  margin: 2px 0 0;
+}
+
+.logoutRow :global(.btn) {
+  width: auto;
+  flex: none;
+  padding: 0 14px;
 }

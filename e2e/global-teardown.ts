@@ -80,6 +80,7 @@ export default async function globalTeardown() {
       "update collection_items set source='chat' where user_id=$1 and text_id in (select id from texts where owner_id=$1 and title='My Best Friend')",
       [userId],
     )
+    await client.query('delete from user_themes where user_id=$1', [userId]).catch(() => undefined)
   } finally {
     await client.end()
   }

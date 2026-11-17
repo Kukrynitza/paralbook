@@ -19,7 +19,7 @@
 
 .pager button.on {
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
@@ -35,7 +35,7 @@
   min-width: 122px;
   padding: 0 14px;
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
   font-weight: 600;
   font-size: 13px;
 }

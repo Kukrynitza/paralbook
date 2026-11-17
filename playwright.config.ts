@@ -15,6 +15,7 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL || 'http://localhost:5173',
     storageState: 'e2e/.auth/user.json',
     viewport: { width: 430, height: 900 },
+    colorScheme: 'dark',
     trace: 'retain-on-failure',
   },
   projects: [

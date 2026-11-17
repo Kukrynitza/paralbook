@@ -38,18 +38,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const apply = () => {
-      const pref = user?.theme ?? 'system'
-      const resolved = pref === 'system' ? (media.matches ? 'dark' : 'light') : pref
-      document.documentElement.dataset.theme = resolved
-    }
-    apply()
-    media.addEventListener('change', apply)
-    return () => media.removeEventListener('change', apply)
-  }, [user?.theme])
-
   const value = useMemo<AuthValue>(
     () => ({
       user,

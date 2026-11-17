@@ -1,5 +1,6 @@
 import { CamelCasePlugin, type Generated, type GeneratedAlways, Kysely, PostgresDialect } from 'kysely'
 import { Pool } from 'pg'
+import type { ThemePrefs } from '@/sorse/themeTypes'
 
 type Cefr = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'
 type ThemePref = 'system' | 'light' | 'dark'
@@ -155,6 +156,12 @@ export interface LlmSettings {
   updatedAt: Generated<Date>
 }
 
+export interface UserThemes {
+  userId: string
+  prefs: ThemePrefs
+  updatedAt: Generated<Date>
+}
+
 export interface TextJobs {
   id: Generated<string>
   userId: string
@@ -187,6 +194,7 @@ export interface Database {
   friendships: Friendships
   chatMessages: ChatMessages
   llmSettings: LlmSettings
+  userThemes: UserThemes
   textJobs: TextJobs
 }
 

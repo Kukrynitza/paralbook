@@ -1,20 +1,49 @@
 'use client'
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Eye, EyeOff, Info, X } from 'lucide-react'
+import {
+  ArrowLeft,
+  BarChart3,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  GraduationCap,
+  Info,
+  Languages,
+  LogOut,
+  Palette,
+  Sparkles,
+  Type,
+  UserRound,
+  X,
+  type LucideIcon,
+} from 'lucide-react'
 import { minLength, pipe, safeParse, string } from 'valibot'
 import changePasswordAction from '@/actions/Profile/changePassword'
 import systemInfo from '@/actions/Profile/systemInfo'
 import updateMe from '@/actions/Profile/updateMe'
 import seedVocabulary from '@/actions/Vocabulary/seedVocabulary'
-import { GOALS, INTERESTS, LEVELS, type Cefr, type LlmSettingsView, type SystemInfo, type ThemePref, type User } from '@/sorse/types'
+import { GOALS, INTERESTS, LEVELS, type Cefr, type LlmSettingsView, type SystemInfo, type User } from '@/sorse/types'
 import { useAuth, useUi } from '@/contexts/AuthContext'
+import { useTheme } from '@/contexts/ThemeContext'
 import { markSeedAsked } from '@/sorse/prefs'
 import { llmRequest } from '@/sorse/llmClient'
-import { DEFAULT_CHUNK, normalizeChunk, readChunkPrefs, requestsPer10k, writeChunkPrefs, type ChunkPrefs, type ChunkUnit } from '@/sorse/translationPrefs'
+import {
+  DEFAULT_CHUNK,
+  normalizeChunk,
+  readChunkPrefs,
+  requestsPer10k,
+  writeChunkPrefs,
+  type ChunkPrefs,
+  type ChunkUnit,
+} from '@/sorse/translationPrefs'
+import { FONTS, READING_FONTS, UI_FONTS, type FontId, type ReaderSize } from '@/sorse/fonts'
+import { paletteFor } from '@/sorse/themePrefs'
+import { THEME_PRESETS, type ThemeMode } from '@/sorse/themeTypes'
 import Help from '@/components/Help/Help'
+import ThemeSheet from '@/components/ThemeSheet/ThemeSheet'
 import styles from './page.module.css'
 
 const currentSchema = pipe(string(), minLength(1, 'Введите текущий пароль'))
@@ -32,6 +61,53 @@ const LLM_PRESETS = [
   { id: 'custom', label: 'Свой сервер', baseUrl: '', model: '' },
 ] as const
 
+const MODES: { id: ThemeMode; label: string }[] = [
+  { id: 'system', label: 'Системная' },
+  { id: 'light', label: 'Светлая' },
+  { id: 'dark', label: 'Тёмная' },
+  { id: 'custom', label: 'Своя' },
+]
+
+const SIZES: { id: ReaderSize; label: string }[] = [
+  { id: 's', label: 'S' },
+  { id: 'm', label: 'M' },
+  { id: 'l', label: 'L' },
+]
+
+type Tone = 'orange' | 'blue' | 'purple' | 'green' | 'pink' | 'slate'
+
+function Card({
+  icon: Icon,
+  tone,
+  title,
+  summary,
+  open,
+  onToggle,
+  children,
+}: {
+  icon: LucideIcon
+  tone: Tone
+  title: string
+  summary?: string
+  open: boolean
+  onToggle: () => void
+  children: ReactNode
+}) {
+  return (
+    <section className={`${styles.card} ${styles[tone]}`}>
+      <button type="button" className={styles.cardHead} onClick={onToggle} aria-expanded={open}>
+        <span className={styles.cardIcon}>
+          <Icon size={17} />
+        </span>
+        <span className={styles.cardTitle}>{title}</span>
+        {summary ? <span className={styles.cardSummary}>{summary}</span> : null}
+        <ChevronDown size={16} className={open ? `${styles.chev} ${styles.chevOn}` : styles.chev} />
+      </button>
+      {open ? <div className={styles.cardBody}>{children}</div> : null}
+    </section>
+  )
+}
+
 function providerFor(baseUrl: string) {
   return LLM_PRESETS.find((item) => item.baseUrl && item.baseUrl === baseUrl)?.id ?? 'custom'
 }
@@ -39,6 +115,7 @@ function providerFor(baseUrl: string) {
 export default function Page() {
   const { user, setUser, logout } = useAuth()
   const { confirm, notify, notifyError } = useUi()
+  const { prefs, save, reset } = useTheme()
   const router = useRouter()
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
@@ -61,20 +138,23 @@ export default function Page() {
   const [info, setInfo] = useState<SystemInfo | null>(null)
   const [infoOpen, setInfoOpen] = useState(false)
   const [infoLoading, setInfoLoading] = useState(false)
+  const [themeOpen, setThemeOpen] = useState(false)
+  const [passwordOpen, setPasswordOpen] = useState(false)
+  const [openCard, setOpenCard] = useState<string | null>('appearance')
   const llmUserId = user?.id
 
   useEffect(() => {
     if (!llmUserId) return
     let active = true
     llmRequest<LlmSettingsView>('/v1/llm/settings')
-      .then((next) => {
+      .then((value) => {
         if (!active) return
-        setLlmSettings(next)
-        if (next.baseUrl) {
-          setLlmBaseUrl(next.baseUrl)
-          setLlmProvider(providerFor(next.baseUrl))
+        setLlmSettings(value)
+        if (value.baseUrl) {
+          setLlmBaseUrl(value.baseUrl)
+          setLlmProvider(providerFor(value.baseUrl))
         }
-        if (next.model) setLlmModel(next.model)
+        if (value.model) setLlmModel(value.model)
       })
       .catch(() => {
         if (active) setLlmSettings(null)
@@ -96,15 +176,26 @@ export default function Page() {
     ? modelChoices.filter((item) => item.toLowerCase().includes(modelFilter))
     : modelChoices
   const shownModels = filteredModels.slice(0, 200)
+  const modeLabel = MODES.find((mode) => mode.id === prefs.mode)?.label ?? 'Системная'
+  const preset = prefs.mode === 'custom'
+    ? THEME_PRESETS.find(
+        (item) =>
+          item.palette.bg === prefs.custom.bg &&
+          item.palette.surface === prefs.custom.surface &&
+          item.palette.text === prefs.custom.text,
+      )
+    : undefined
+  const appearanceSummary = prefs.mode === 'custom' ? `Своя · ${preset?.label ?? prefs.custom.bg}` : modeLabel
+  const fontSummary = `${FONTS[prefs.fonts.ui].label} · ${FONTS[prefs.fonts.reading].label}`
+  const fontPreview = {
+    fontFamily: FONTS[prefs.fonts.reading].variable
+      ? `var(${FONTS[prefs.fonts.reading].variable})`
+      : 'system-ui',
+  }
 
-  const resolved: ThemePref =
-    user.theme === 'system'
-      ? typeof window === 'undefined'
-        ? 'dark'
-        : window.matchMedia('(prefers-color-scheme: dark)').matches
-          ? 'dark'
-          : 'light'
-      : user.theme
+  function toggleCard(id: string) {
+    setOpenCard((value) => (value === id ? null : id))
+  }
 
   async function patch(body: Partial<User>) {
     const updated = await updateMe(body)
@@ -131,20 +222,24 @@ export default function Page() {
     setOfferLevel(null)
   }
 
-  function chooseTheme(value: 'light' | 'dark') {
-    if (user?.theme === 'system' && value === resolved) return
-    if (user?.theme === value) return
-    void patch({ theme: value })
+  function chooseMode(mode: ThemeMode) {
+    if (mode === 'custom') {
+      save({ ...prefs, mode, custom: paletteFor(prefs) })
+      return
+    }
+    save({ ...prefs, mode })
   }
 
-  function patchChunk(next: Partial<ChunkPrefs>) {
-    const value = normalizeChunk(next.unit ?? chunk.unit, next.size ?? chunk.size)
-    setChunk(value)
-    writeChunkPrefs(value)
+  function chooseUiFont(id: FontId) {
+    save({ ...prefs, fonts: { ...prefs.fonts, ui: id } })
   }
 
-  function chooseChunkUnit(unit: ChunkUnit) {
-    patchChunk({ unit, size: unit === 'sentences' ? 3 : 1200 })
+  function chooseReadingFont(id: FontId) {
+    save({ ...prefs, fonts: { ...prefs.fonts, reading: id } })
+  }
+
+  function chooseSize(size: ReaderSize) {
+    save({ ...prefs, fonts: { ...prefs.fonts, size } })
   }
 
   async function changePassword(event: FormEvent) {
@@ -160,19 +255,20 @@ export default function Page() {
       setError(nextCheck.issues[0].message)
       return
     }
-    if (nextCheck.output !== again) {
+    if (next !== again) {
       setError('Пароли не совпадают')
       return
     }
     try {
-      const error = await changePasswordAction({ current: currentCheck.output, next: nextCheck.output })
-      if (error) {
-        setError(error)
+      const result = await changePasswordAction({ current, next })
+      if (result) {
+        setError(result)
         return
       }
       setCurrent('')
       setNext('')
       setAgain('')
+      setPasswordOpen(false)
       notify('Пароль изменён')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Не удалось сменить пароль')
@@ -197,25 +293,25 @@ export default function Page() {
   }
 
   async function reloadLlm() {
-    const next = await llmRequest<LlmSettingsView>('/v1/llm/settings')
-    setLlmSettings(next)
-    if (next.baseUrl) {
-      setLlmBaseUrl(next.baseUrl)
-      setLlmProvider(providerFor(next.baseUrl))
+    const value = await llmRequest<LlmSettingsView>('/v1/llm/settings')
+    setLlmSettings(value)
+    if (value.baseUrl) {
+      setLlmBaseUrl(value.baseUrl)
+      setLlmProvider(providerFor(value.baseUrl))
     }
-    if (next.model) setLlmModel(next.model)
-    return next
+    if (value.model) setLlmModel(value.model)
+    return value
   }
 
   async function saveLlm() {
     setLlmBusy('save')
     setLlmCheck(null)
     try {
-      const next = await llmRequest<LlmSettingsView>('/v1/llm/settings', {
+      const value = await llmRequest<LlmSettingsView>('/v1/llm/settings', {
         method: 'POST',
         body: JSON.stringify({ baseUrl: llmBaseUrl, model: llmModel, apiKey: llmKey }),
       })
-      setLlmSettings(next)
+      setLlmSettings(value)
       setLlmKey('')
       notify('Настройки нейросети сохранены')
     } catch (reason) {
@@ -326,62 +422,92 @@ export default function Page() {
     }
   }
 
+  function patchChunk(nextValue: Partial<ChunkPrefs>) {
+    const value = normalizeChunk(nextValue.unit ?? chunk.unit, nextValue.size ?? chunk.size)
+    setChunk(value)
+    writeChunkPrefs(value)
+  }
+
+  function chooseChunkUnit(unit: ChunkUnit) {
+    patchChunk({ unit, size: unit === 'sentences' ? 3 : 1200 })
+  }
+
   return (
     <div>
       <header className="header">
         <button className="back" onClick={() => router.back()} aria-label="Назад">
           <ArrowLeft size={22} />
         </button>
-        <h1>Настройки аккаунта</h1>
+        <h1>Настройки</h1>
         <button className="icon-btn" aria-label="Справка" onClick={() => void openInfo()}>
           <Info size={20} />
         </button>
       </header>
-      <div className="pad stack">
-        <div>
-          <div className="label">Email</div>
-          <div style={{ marginTop: 6 }}>{user.email}</div>
-        </div>
-        <form className="stack" onSubmit={changePassword}>
-          <strong>Смена пароля</strong>
-          {[
-            ['Текущий пароль', current, setCurrent],
-            ['Новый пароль', next, setNext],
-            ['Подтвердите новый пароль', again, setAgain],
-          ].map(([label, value, setter]) => (
-            <div className="input-wrap" key={String(label)}>
-              <input
-                className="input compact"
-                type={shown ? 'text' : 'password'}
-                placeholder={String(label)}
-                value={String(value)}
-                onChange={(event) => (setter as (item: string) => void)(event.target.value)}
-              />
-              <button type="button" className="eye" onClick={() => setShown((item) => !item)} aria-label="Показать пароль">
-                {shown ? <Eye size={16} /> : <EyeOff size={16} />}
-              </button>
-            </div>
-          ))}
-          <p className="small muted">Новый пароль — не менее 8 символов</p>
-          {error ? <p className="form-error">{error}</p> : null}
-          <button className="btn slim">Сменить пароль</button>
-        </form>
-        <div>
-          <strong>Уровень английского</strong>
-          <div className="gap8" style={{ marginTop: 8 }}>
+
+      <div className="pad stack" style={{ gap: 12 }}>
+        <Card
+          icon={UserRound}
+          tone="orange"
+          title="Аккаунт"
+          summary={user.email}
+          open={openCard === 'account'}
+          onToggle={() => toggleCard('account')}
+        >
+          <div className={styles.accountRow}>
+            <span className="muted">Email</span>
+            <b>{user.email}</b>
+          </div>
+          <button type="button" className="btn ghost slim" onClick={() => setPasswordOpen((value) => !value)}>
+            {passwordOpen ? 'Скрыть смену пароля' : 'Изменить пароль'}
+          </button>
+          {passwordOpen ? (
+            <form className="stack" style={{ gap: 10 }} onSubmit={changePassword}>
+              {[
+                ['Текущий пароль', current, setCurrent],
+                ['Новый пароль', next, setNext],
+                ['Подтвердите новый пароль', again, setAgain],
+              ].map(([label, value, setter]) => (
+                <div className="input-wrap" key={String(label)}>
+                  <input
+                    className="input compact"
+                    type={shown ? 'text' : 'password'}
+                    placeholder={String(label)}
+                    value={String(value)}
+                    onChange={(event) => (setter as (item: string) => void)(event.target.value)}
+                  />
+                  <button type="button" className="eye" onClick={() => setShown((item) => !item)} aria-label="Показать пароль">
+                    {shown ? <Eye size={16} /> : <EyeOff size={16} />}
+                  </button>
+                </div>
+              ))}
+              <p className="small muted">Новый пароль — не менее 8 символов</p>
+              {error ? <p className="form-error">{error}</p> : null}
+              <button className="btn slim">Сохранить пароль</button>
+            </form>
+          ) : null}
+        </Card>
+
+        <Card
+          icon={GraduationCap}
+          tone="green"
+          title="Обучение"
+          summary={`${user.cefr} · ${user.dailyGoalMin} мин`}
+          open={openCard === 'learning'}
+          onToggle={() => toggleCard('learning')}
+        >
+          <span className={styles.labelMuted}>Уровень английского</span>
+          <div className="gap8">
             {LEVELS.map((level) => (
-              <button key={level} className={user.cefr === level ? 'chip on' : 'chip'} onClick={() => chooseLevel(level)}>
+              <button key={level} className={user.cefr === level ? 'chip on' : 'chip'} onClick={() => void chooseLevel(level)}>
                 {level}
               </button>
             ))}
           </div>
-        </div>
-        <div>
           <div className="row">
-            <strong>Интересы</strong>
-            <span className="small muted">Можно выбрать несколько</span>
+            <span className={styles.labelMuted}>Интересы</span>
+            <span className="small muted">можно несколько</span>
           </div>
-          <div className="gap8" style={{ marginTop: 8 }}>
+          <div className="gap8">
             {INTERESTS.map((interest) => {
               const on = user.interests.includes(interest)
               return (
@@ -392,49 +518,134 @@ export default function Page() {
               )
             })}
           </div>
-        </div>
-        <div>
-          <strong>Цель на день</strong>
-          <div className="gap8" style={{ marginTop: 8 }}>
+          <span className={styles.labelMuted}>Цель на день</span>
+          <div className="gap8">
             {GOALS.map((goal) => (
-              <button key={goal} className={user.dailyGoalMin === goal ? 'chip on' : 'chip'} onClick={() => patch({ dailyGoalMin: goal })}>
+              <button
+                key={goal}
+                className={user.dailyGoalMin === goal ? 'chip on' : 'chip'}
+                onClick={() => void patch({ dailyGoalMin: goal })}
+              >
                 {goal} мин
               </button>
             ))}
           </div>
-        </div>
-        <div>
           <div className="row">
-            <strong style={{ fontSize: 13 }}>Показывать друзьям мои минуты</strong>
-            <button className={user.showMinutes ? `${styles.toggle} ${styles.toggleOn}` : styles.toggle} onClick={() => patch({ showMinutes: !user.showMinutes })} aria-label="Показывать минуты">
+            <span className={styles.labelMuted}>Показывать друзьям минуты</span>
+            <button
+              className={user.showMinutes ? `${styles.toggle} ${styles.toggleOn}` : styles.toggle}
+              onClick={() => void patch({ showMinutes: !user.showMinutes })}
+              aria-label="Показывать минуты"
+            >
               <i />
             </button>
           </div>
-          <p className="small muted">Друзья видят только минуты сегодня и серию</p>
-        </div>
-        <div>
-          <strong>Тема</strong>
-          <div className={styles.seg} style={{ marginTop: 8 }}>
-            <button type="button" className={resolved === 'dark' ? styles.on : ''} onClick={() => chooseTheme('dark')}>
-              Тёмная
+        </Card>
+
+        <Card
+          icon={Palette}
+          tone="purple"
+          title="Внешний вид"
+          summary={`${appearanceSummary}`}
+          open={openCard === 'appearance'}
+          onToggle={() => toggleCard('appearance')}
+        >
+          <div className={styles.modes}>
+            {MODES.map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                className={prefs.mode === mode.id ? 'chip on' : 'chip'}
+                onClick={() => chooseMode(mode.id)}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+          <div className={styles.appearanceRow}>
+            <span className={styles.dots}>
+              <i style={{ background: 'var(--bg)' }} />
+              <i style={{ background: 'var(--surface)' }} />
+              <i style={{ background: 'var(--text)' }} />
+            </span>
+            <span className="small muted">Фон · карточки · текст</span>
+          </div>
+          <div className={styles.actionsRow}>
+            <button className="btn slim" type="button" onClick={() => setThemeOpen(true)}>
+              Настроить цвета
             </button>
-            <button type="button" className={resolved === 'light' ? styles.on : ''} onClick={() => chooseTheme('light')}>
-              Светлая
+            <button className="btn ghost slim" type="button" onClick={reset}>
+              Сбросить
             </button>
           </div>
-        </div>
-        <div>
+        </Card>
+
+        <Card
+          icon={Type}
+          tone="blue"
+          title="Шрифты"
+          summary={fontSummary}
+          open={openCard === 'fonts'}
+          onToggle={() => toggleCard('fonts')}
+        >
+          <label className="field">
+            <span>Интерфейс</span>
+            <select className="input compact" value={prefs.fonts.ui} onChange={(event) => chooseUiFont(event.target.value as FontId)}>
+              {UI_FONTS.map((id) => (
+                <option key={id} value={id}>
+                  {FONTS[id].label} — {FONTS[id].hint}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Чтение</span>
+            <select className="input compact" value={prefs.fonts.reading} onChange={(event) => chooseReadingFont(event.target.value as FontId)}>
+              {READING_FONTS.map((id) => (
+                <option key={id} value={id}>
+                  {FONTS[id].label} — {FONTS[id].hint}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="row">
-            <strong>Нейросеть</strong>
-            <span className={`small ${llmSettings?.source === 'user' || llmSettings?.source === 'env' ? styles.ok : 'muted'}`}>{llmStatus()}</span>
+            <span className={styles.labelMuted}>Размер текста</span>
+            <div className={styles.segSmall}>
+              {SIZES.map((size) => (
+                <button
+                  key={size.id}
+                  type="button"
+                  className={prefs.fonts.size === size.id ? styles.on : ''}
+                  onClick={() => chooseSize(size.id)}
+                >
+                  {size.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <p className="small muted" style={{ margin: '6px 0 0' }}>Подходит любой сервис с OpenAI-совместимым API.</p>
+          <div className={styles.fontSample} style={fontPreview}>
+            <b>The morning was quiet.</b>
+            <p>Утро было тихим, и озеро спало под туманом.</p>
+          </div>
+        </Card>
+
+        <Card
+          icon={Sparkles}
+          tone="pink"
+          title="Нейросеть"
+          summary={llmStatus()}
+          open={openCard === 'llm'}
+          onToggle={() => toggleCard('llm')}
+        >
+          <p className="small muted" style={{ margin: 0 }}>
+            Перевод и генерация в чате. Подходит любой сервис с OpenAI-совместимым API.
+          </p>
           {llmSettings?.source === 'none' ? (
-            <p className={`small ${styles.warn}`} style={{ margin: '4px 0 0' }}>
+            <p className={`small ${styles.warn}`} style={{ margin: 0 }}>
               Без ключа не работают генерация в чате и перевод, а значит и добавление текстов.
             </p>
           ) : null}
-          <div className="stack" style={{ gap: 10, marginTop: 10 }}>
+          <div className="stack" style={{ gap: 10 }}>
             <label className="field">
               <span>Провайдер</span>
               <select className="input compact" value={llmProvider} onChange={(event) => chooseLlmProvider(event.target.value)}>
@@ -471,7 +682,7 @@ export default function Page() {
                   className="input compact"
                   type={llmShown ? 'text' : 'password'}
                   value={llmKey}
-                  placeholder={llmSettings?.hasKey ? `Ключ сохранён${llmSettings.keyHint ? ` ••••${llmSettings.keyHint}` : ''} — оставьте пустым, чтобы не менять` : 'Ключ провайдера'}
+                  placeholder={llmSettings?.hasKey ? `Ключ сохранён${llmSettings.keyHint ? ` ••••${llmSettings.keyHint}` : ''} — оставьте пустым` : 'Ключ провайдера'}
                   onChange={(event) => setLlmKey(event.target.value)}
                 />
                 <button type="button" className="eye" onClick={() => setLlmShown((item) => !item)} aria-label="Показать API-ключ">
@@ -479,41 +690,52 @@ export default function Page() {
                 </button>
               </div>
             </label>
-            {llmCheck ? <p className={`small ${llmCheck.ok ? styles.ok : styles.bad}`} style={{ margin: 0 }}>{llmCheck.text}</p> : null}
-            {llmSettings && !llmSettings.tableReady ? (
-              <p className="small muted" style={{ margin: 0 }}>Таблица llm_settings ещё не создана в Supabase — сохранение станет доступно после её добавления.</p>
-            ) : null}
-            <div className={styles.llmActions}>
-              <button type="button" className="btn ghost slim" disabled={llmBusy !== null} onClick={() => void testLlm()}>
-                {llmBusy === 'test' ? 'Проверяю…' : 'Проверить'}
-              </button>
-              <button type="button" className="btn slim" disabled={llmBusy !== null} onClick={() => void saveLlm()}>
-                {llmBusy === 'save' ? 'Сохраняю…' : 'Сохранить'}
-              </button>
-            </div>
-            <div className={styles.llmActions}>
-              <button type="button" className="btn ghost slim" disabled={llmBusy !== null} onClick={() => void loadLlmModels()}>
-                {llmBusy === 'models' ? 'Запрашиваю…' : 'Выбрать модель'}
-              </button>
-              <button
-                type="button"
-                className="btn danger slim"
-                disabled={llmBusy !== null || llmSettings?.source !== 'user'}
-                onClick={() => void removeLlm()}
-              >
-                {llmBusy === 'clear' ? 'Удаляю…' : 'Удалить настройки'}
-              </button>
-            </div>
-            <p className="small muted" style={{ margin: 0 }}>Для локальных моделей ключ не нужен. На Vercel localhost указывает на сервер Vercel, а не на ваш компьютер.</p>
           </div>
-        </div>
-        <div>
-          <strong>Размер блока перевода</strong>
-          <p className="small muted" style={{ margin: '6px 0 0' }}>
+          {llmCheck ? <p className={`small ${llmCheck.ok ? styles.ok : styles.bad}`} style={{ margin: 0 }}>{llmCheck.text}</p> : null}
+          {llmSettings && !llmSettings.tableReady ? (
+            <p className="small muted" style={{ margin: 0 }}>
+              Таблица llm_settings ещё не создана в Supabase — сохранение станет доступно после её добавления.
+            </p>
+          ) : null}
+          <div className={styles.actionsRow}>
+            <button type="button" className="btn soft slim" disabled={llmBusy !== null} onClick={() => void testLlm()}>
+              {llmBusy === 'test' ? 'Проверяю…' : 'Проверить'}
+            </button>
+            <button type="button" className="btn slim" disabled={llmBusy !== null} onClick={() => void saveLlm()}>
+              {llmBusy === 'save' ? 'Сохраняю…' : 'Сохранить'}
+            </button>
+          </div>
+          <div className={styles.actionsRow}>
+            <button type="button" className="btn ghost slim" disabled={llmBusy !== null} onClick={() => void loadLlmModels()}>
+              {llmBusy === 'models' ? 'Запрашиваю…' : 'Выбрать модель'}
+            </button>
+            <button
+              type="button"
+              className={`btn ghost slim ${styles.dangerLink}`}
+              disabled={llmBusy !== null || llmSettings?.source !== 'user'}
+              onClick={() => void removeLlm()}
+            >
+              {llmBusy === 'clear' ? 'Удаляю…' : 'Удалить настройки'}
+            </button>
+          </div>
+          <p className="small muted" style={{ margin: 0 }}>
+            Для локальных моделей ключ не нужен. На Vercel localhost указывает на сервер Vercel, а не на ваш компьютер.
+          </p>
+        </Card>
+
+        <Card
+          icon={Languages}
+          tone="green"
+          title="Перевод"
+          summary={`${chunk.size} ${chunk.unit === 'tokens' ? 'ток.' : 'предл.'}`}
+          open={openCard === 'chunk'}
+          onToggle={() => toggleCard('chunk')}
+        >
+          <p className="small muted" style={{ margin: 0 }}>
             Сколько текста уходит в нейросеть за один запрос. Меньше — точнее, но больше запросов. Больше — быстрее
             и дешевле; для хорошей модели качество почти не падает.
           </p>
-          <div className={styles.seg} style={{ marginTop: 8 }}>
+          <div className={styles.seg}>
             <button type="button" className={chunk.unit === 'tokens' ? styles.on : ''} onClick={() => chooseChunkUnit('tokens')}>
               Токены
             </button>
@@ -535,23 +757,49 @@ export default function Page() {
               {chunk.size} {chunk.unit === 'tokens' ? 'ток.' : 'предл.'}
             </b>
           </div>
-          <p className="small muted" style={{ margin: '4px 0 0' }}>
+          <p className="small muted" style={{ margin: 0 }}>
             ≈ {requestsPer10k(chunk)} запросов на 10 000 слов. Настройка хранится в этом браузере.
           </p>
-        </div>
-        <button
-          className="btn ghost slim"
-          onClick={() => {
-            logout()
-            router.push('/login')
-          }}
+        </Card>
+
+        <Card
+          icon={BarChart3}
+          tone="slate"
+          title="Данные и помощь"
+          summary="статистика, справка"
+          open={openCard === 'data'}
+          onToggle={() => toggleCard('data')}
         >
-          Выйти
-        </button>
-        <Link className="btn slim" href="/stats">
-          Статистика недели
-        </Link>
+          <div className={styles.actionsRow}>
+            <Link className="btn ghost slim" href="/stats">
+              Статистика недели
+            </Link>
+            <button type="button" className="btn ghost slim" onClick={() => void openInfo()}>
+              Справка
+            </button>
+          </div>
+        </Card>
+
+        <section className={`${styles.card} ${styles.slate}`}>
+          <div className={styles.logoutRow}>
+            <div>
+              <b>Выход</b>
+              <p className="small muted">Завершить сеанс на этом устройстве</p>
+            </div>
+            <button
+              className="btn danger slim"
+              onClick={() => {
+                logout()
+                router.push('/login')
+              }}
+            >
+              <LogOut size={15} />
+              Выйти
+            </button>
+          </div>
+        </section>
       </div>
+
       {offerLevel ? (
         <div className="modal-dim">
           <div className="modal">
@@ -568,6 +816,9 @@ export default function Page() {
           </div>
         </div>
       ) : null}
+
+      {themeOpen ? <ThemeSheet onClose={() => setThemeOpen(false)} /> : null}
+
       {modelsOpen ? (
         <div className="modal-dim" onClick={() => setModelsOpen(false)}>
           <div
@@ -625,6 +876,7 @@ export default function Page() {
           </div>
         </div>
       ) : null}
+
       {infoOpen ? (
         <Help
           info={info}

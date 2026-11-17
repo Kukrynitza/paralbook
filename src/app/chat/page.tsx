@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { BookOpen, Clock, FilePlus, Globe, Sparkles, Trash2 } from 'lucide-react'
 import { maxValue, minLength, minValue, number, picklist, pipe, safeParse, string, trim } from 'valibot'
 import deleteChatMessage from '@/actions/Chat/deleteChatMessage'
 import generateText from '@/actions/Chat/generateText'
@@ -36,6 +37,13 @@ function askedMinutes(text: string) {
 }
 
 const DURATIONS = [10, 15, 20, 30, 45, 60]
+
+const PROMPTS = [
+  { text: 'Детектив в Лондоне, 10 минут', tone: 'blue' },
+  { text: 'Путешествие по Исландии, 15 минут', tone: 'teal' },
+  { text: 'Научная статья о сне, 10 минут', tone: 'purple' },
+  { text: 'История про уточку, 5 минут', tone: 'orange' },
+] as const
 
 function pick<T>(items: readonly T[]) {
   return items[Math.floor(Math.random() * items.length)]
@@ -237,7 +245,29 @@ export default function Page() {
       <header className="header">
         <h1>Чат</h1>
       </header>
+      <p className={styles.lead}>Опишите тему — соберу текст с переводом</p>
       <div className={styles.thread} style={{ flex: 1 }}>
+        {!messages.length && !pending && !busyJob ? (
+          <div className={styles.empty}>
+            <span className={styles.emptyIcon}>
+              <Sparkles size={20} />
+            </span>
+            <h2>О чём почитать?</h2>
+            <p>Можно указать время и уровень. Например: «детектив, 10 минут, B1».</p>
+            <div className={styles.prompts}>
+              {PROMPTS.map((prompt) => (
+                <button
+                  key={prompt.text}
+                  type="button"
+                  className={`${styles.prompt} ${styles[prompt.tone]}`}
+                  onClick={() => void send(prompt.text)}
+                >
+                  {prompt.text}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {messages.map((message) => {
           if (message.role === 'user') {
             return (
@@ -251,7 +281,7 @@ export default function Page() {
           }
           if (message.role === 'assistant') {
             return (
-              <div className={styles.bubble} key={message.id}>
+              <div className={`${styles.bubble} ${styles.assistant}`} key={message.id}>
                 {message.text}
               </div>
             )
@@ -260,14 +290,19 @@ export default function Page() {
             return (
               <div className={`card ${styles.alarm}`} key={message.id}>
                 <p className={styles.alarmText}>{message.text}</p>
-                {/ключ|не настроена/i.test(message.text) ? (
-                  <Link className="btn ghost" style={{ marginTop: 8 }} href="/settings">
-                    Указать ключ
-                  </Link>
-                ) : null}
-                <button className="btn" style={{ marginTop: 16 }} onClick={() => send(message.retry.topic, message.retry.minutes, message.retry.level)}>
-                  Повторить
-                </button>
+                <div className={styles.alarmActions}>
+                  {/ключ|не настроена/i.test(message.text) ? (
+                    <Link className="btn ghost slim" href="/settings">
+                      Указать ключ
+                    </Link>
+                  ) : null}
+                  <button
+                    className="btn soft slim"
+                    onClick={() => send(message.retry.topic, message.retry.minutes, message.retry.level)}
+                  >
+                    Повторить
+                  </button>
+                </div>
               </div>
             )
           }
@@ -275,22 +310,37 @@ export default function Page() {
           const card = message.text
           return (
             <article className={`card ${styles.result}`} key={message.id}>
-              <h3>{card.title}</h3>
-              <p>{preview(card.excerpt)}</p>
-              <div className="meta">
-                <span>{card.minutes} мин · {card.level}</span>
-                {card.published ? <PublishedBadge /> : null}
+              <div className={styles.resultTop}>
+                <span className={styles.resultIcon} data-level={card.level}>
+                  <BookOpen size={16} />
+                </span>
+                <div className={styles.resultHead}>
+                  <h3>{card.title}</h3>
+                  <div className={styles.resultMeta}>
+                    <span className={styles.level} data-level={card.level}>
+                      {card.level}
+                    </span>
+                    <span className={styles.metaItem}>
+                      <Clock size={12} />
+                      {card.minutes} мин
+                    </span>
+                    {card.published ? <PublishedBadge /> : null}
+                  </div>
+                </div>
               </div>
-              <div className="actions">
+              <p className={styles.excerpt}>{preview(card.excerpt)}</p>
+              <div className={styles.resultActions}>
                 <Link className="btn slim" href={`/read/${card.id}`}>
                   Читать
                 </Link>
                 {card.published ? null : (
                   <>
-                    <button className="btn ghost wrap" onClick={() => setPublishingId(card.id)}>
+                    <button className="btn soft slim" onClick={() => setPublishingId(card.id)}>
+                      <Globe size={14} />
                       Опубликовать в библиотеку
                     </button>
-                    <button className="btn danger slim" onClick={() => remove(card.id)}>
+                    <button className={`btn ghost slim ${styles.delete}`} onClick={() => remove(card.id)}>
+                      <Trash2 size={14} />
                       Удалить
                     </button>
                   </>
@@ -301,8 +351,19 @@ export default function Page() {
         })}
         {pending ? (
           <div className={styles.wait}>
-            Собираю текст…{progress ? ` ${progress}%` : ''}
-            {stage === 'generating' ? ' · генерирую' : stage === 'aligning' ? ' · выравниваю' : stage === 'saving' ? ' · сохраняю' : ''}
+            <span className={styles.waitTitle}>Собираю текст{progress ? ` · ${progress}%` : ''}</span>
+            <div className="bar">
+              <i style={{ width: `${Math.max(4, progress)}%` }} />
+            </div>
+            <span className={styles.waitStage}>
+              {stage === 'generating'
+                ? 'генерирую'
+                : stage === 'aligning'
+                  ? 'выравниваю'
+                  : stage === 'saving'
+                    ? 'сохраняю'
+                    : 'подготавливаю'}
+            </span>
           </div>
         ) : null}
       </div>
@@ -318,8 +379,7 @@ export default function Page() {
       {busyJob ? (
         <div className={styles.busy}>
           <strong>Сейчас выполняется: {busyJob.title}</strong>
-          <div className="bar"><i style={{ width: `${Math.max(2, busyJob.progress)}%` }} /></div>
-          <div className="row small muted">
+          <div className="bar"><i style={{ width: `${Math.max(2, busyJob.progress)}%` }} /></div>          <div className="row small muted">
             <span>{statusLabel(busyJob.stage)}</span>
             <span>{busyJob.progress}%</span>
           </div>
@@ -336,6 +396,7 @@ export default function Page() {
           }}
         >
           <Link className={styles.own} href="/text">
+            <FilePlus size={15} />
             Добавить текст
           </Link>
           <input className="input" value={draft} placeholder="Тема и время чтения" onChange={(event) => setDraft(event.target.value)} />

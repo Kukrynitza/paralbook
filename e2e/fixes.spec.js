@@ -63,12 +63,14 @@ test('reload during upload restores the server job and can cancel it', async ({ 
 
 test('chunk size is stored in the browser', async ({ page }) => {
   await page.goto('http://localhost:5173/settings')
+  await page.getByRole('button', { name: /Перевод/ }).click()
   await page.getByRole('button', { name: 'Предложения' }).click()
   const stored = await page.evaluate(() => localStorage.getItem('paralbook.translation.v1'))
   expect(JSON.parse(stored)).toEqual({ unit: 'sentences', size: 3 })
   await page.reload()
+  await page.getByRole('button', { name: /Перевод/ }).click()
   await expect(page.getByRole('button', { name: 'Предложения' })).toHaveClass(/on/)
-  await expect(page.getByText('3 предл.')).toBeVisible()
+  await expect(page.locator('b').filter({ hasText: '3 предл.' })).toBeVisible()
   await page.getByRole('button', { name: 'Токены' }).click()
 })
 

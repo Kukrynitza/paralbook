@@ -55,6 +55,7 @@ export default async function globalSetup() {
         [userId],
       )
       await client.query("update user_words set context_en=null where user_id=$1 and lemma in ('as', 'that')", [userId])
+      await client.query('delete from user_themes where user_id=$1', [userId]).catch(() => undefined)
       const updated = await client.query(
         "update user_words set context_en=$2 where user_id=$1 and lemma='that'",
         [userId, 'PW context check for the first card.'],

@@ -27,13 +27,14 @@
   width: min(100%, 72ch);
   margin: 0 auto;
   padding: 16px 20px 20px;
-  font-size: 18px;
-  line-height: 28px;
+  font-family: var(--reading-font, inherit);
+  font-size: var(--reader-size, 19px);
+  line-height: 1.7;
   white-space: pre-wrap;
 }
 
 @media (min-width: 768px) {
-  .text { font-size: 22px; line-height: 34px; }
+  .text { font-size: calc(var(--reader-size, 19px) * 1.12); }
 }
 
 .pager {
@@ -70,8 +71,9 @@
   overflow-x: auto;
   white-space: nowrap;
   padding: 12px 40% 4px;
-  font-size: 16px;
-  line-height: 24px;
+  font-family: var(--reading-font, inherit);
+  font-size: calc(var(--reader-size, 19px) * 0.88);
+  line-height: 1.55;
   cursor: pointer;
 }
 

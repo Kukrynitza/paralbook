@@ -16,6 +16,7 @@ test('model picker searches and selects a model', async ({ browser }) => {
   const context = await browser.newContext({ storageState: 'e2e/.auth/user.json' })
   const page = await context.newPage()
   await page.goto('http://localhost:5173/settings')
+  await page.getByRole('button', { name: /Нейросеть/ }).click()
   await page.getByRole('button', { name: 'Выбрать модель' }).click()
   const dialog = page.getByRole('dialog', { name: 'Выбор модели' })
   await expect(dialog).toBeVisible({ timeout: 60000 })

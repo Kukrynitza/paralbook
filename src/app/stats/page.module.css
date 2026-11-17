@@ -78,7 +78,7 @@
   border-top: 1px solid var(--bg);
 }
 
-.fresh { background: var(--accent); }
+.fresh { background: #ff6229; }
 .reviewed { background: var(--ok); }
 .known { background: #3b82f6; }
 .mastered { background: var(--word); }
