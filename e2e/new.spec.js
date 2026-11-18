@@ -131,3 +131,33 @@ test('training card shows the saved text example', async ({ page }) => {
   await expect(page.getByText('Из вашего текста')).toBeVisible()
   await expect(page.getByText('PW context check for the first card.')).toBeVisible()
 })
+
+test('training card keeps one height and scrolls inside', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 600 })
+  await page.goto('http://localhost:5173/study?mode=learn&packs=own&daily=60')
+  await expect(page.getByRole('heading', { name: 'that' }).first()).toBeVisible({ timeout: 60000 })
+  await page.getByRole('button', { name: 'Показать подсказку' }).click()
+  await page.waitForTimeout(600)
+  const info = await page.evaluate(() => {
+    const faces = Array.from(document.querySelectorAll('div[class*="face"]'))
+    const back = document.querySelector('div[class*="back"]')
+    const actions = document.querySelector('.actions')
+    const nav = document.querySelector('nav')
+    return {
+      heights: faces.map((face) => Math.round(face.getBoundingClientRect().height)),
+      backScroll: back ? back.scrollHeight : 0,
+      backClient: back ? back.clientHeight : 0,
+      actionsBottom: actions ? Math.round(actions.getBoundingClientRect().bottom) : 0,
+      navTop: nav ? Math.round(nav.getBoundingClientRect().top) : window.innerHeight,
+      viewport: window.innerHeight,
+      body: document.body.scrollHeight,
+    }
+  })
+  expect(new Set(info.heights).size).toBe(1)
+  expect(info.backScroll).toBeGreaterThan(info.backClient)
+  expect(info.navTop - info.actionsBottom).toBeGreaterThanOrEqual(50)
+  expect(info.body).toBe(info.viewport)
+  const back = page.locator('div[class*="back"]')
+  await back.evaluate((element) => { element.scrollTop = 100 })
+  await expect.poll(() => back.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+})

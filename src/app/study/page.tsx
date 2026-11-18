@@ -271,7 +271,7 @@ function Study() {
 
   function screen(body: ReactNode, counter?: string) {
     return (
-      <div>
+      <div className={styles.screen}>
         <header className="header">
           <button className="back" onClick={() => router.push('/vocabulary')} aria-label="Назад">
             <ArrowLeft size={22} />
