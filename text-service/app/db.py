@@ -39,6 +39,7 @@ create table if not exists {DATABASE_SCHEMA}.text_jobs (
 );
 alter table {DATABASE_SCHEMA}.text_jobs add column if not exists payload jsonb;
 alter table {DATABASE_SCHEMA}.text_jobs add column if not exists result jsonb;
+alter table {DATABASE_SCHEMA}.en_tokens add column if not exists ru_align integer;
 """
 
 
@@ -117,9 +118,20 @@ class Database:
                     if en:
                         async with conn.cursor() as cur:
                             await cur.executemany(
-                                f"insert into {DATABASE_SCHEMA}.en_tokens (page_id, position, text, lemma, align) "
-                                "values (%s, %s, %s, %s, %s)",
-                                [(page_id, i, t["text"], t.get("lemma"), t.get("align")) for i, t in enumerate(en)],
+                                f"insert into {DATABASE_SCHEMA}.en_tokens "
+                                "(page_id, position, text, lemma, align, ru_align) "
+                                "values (%s, %s, %s, %s, %s, %s)",
+                                [
+                                    (
+                                        page_id,
+                                        i,
+                                        t["text"],
+                                        t.get("lemma"),
+                                        t.get("align"),
+                                        t.get("ru_align"),
+                                    )
+                                    for i, t in enumerate(en)
+                                ],
                             )
                     if ru:
                         async with conn.cursor() as cur:

@@ -7,7 +7,12 @@ class FakeDictionary:
         return form or None
 
     def candidates(self, lemma):
-        return set()
+        return {
+            "duck": {"утка", "утку"},
+            "lake": {"озеро", "озера"},
+            "morning": {"утро", "утра"},
+            "quiet": {"тихий", "тихое"},
+        }.get(lemma, set())
 
 
 def test_detect_language_english():

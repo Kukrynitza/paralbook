@@ -49,7 +49,11 @@ export default async function globalSetup() {
     const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } })
     await client.connect()
     try {
-      await client.query("update texts set published=false where owner_id=$1 and title='My Best Friend'", [userId])
+      await client.query("update texts set published=true where owner_id=$1 and title='Mario and Pizza'", [userId])
+      await client.query(
+        "update collection_items set source='chat' where user_id=$1 and text_id in (select id from texts where owner_id=$1 and title='Mario and Pizza')",
+        [userId],
+      )
       await client.query(
         "update collection_items set progress=0 where user_id=$1 and text_id='0f36f4fd-775d-4966-a05f-866b1cf1208c'",
         [userId],

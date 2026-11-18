@@ -30,7 +30,14 @@ export default function Page() {
   const [page, setPage] = useState(0)
   const [along, setAlong] = useState(0)
   const [finished, setFinished] = useState(false)
-  const [pick, setPick] = useState<{ index: number; lemma: string; translation?: string; align?: number; phase: 'gloss' | 'popup' } | null>(null)
+  const [pick, setPick] = useState<{
+    index: number
+    lemma: string
+    translation?: string
+    align?: number
+    ruAlign?: number
+    phase: 'gloss' | 'popup'
+  } | null>(null)
   const [entry, setEntry] = useState<DictEntry | null>(null)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -41,9 +48,11 @@ export default function Page() {
   const current = cache[page]
   const slice = current ? wordTokens(current.ruTokens) : []
   const wordCount = current ? wordTokens(current.tokens).length : 0
-  const hit = pick?.align === undefined || !slice.length
-    ? undefined
-    : Math.min(slice.length - 1, Math.floor((pick.align * slice.length) / Math.max(1, wordCount)))
+  const hit = pick?.ruAlign !== undefined && slice.length
+    ? Math.min(slice.length - 1, Math.max(0, pick.ruAlign))
+    : pick?.align === undefined || !slice.length
+      ? undefined
+      : Math.min(slice.length - 1, Math.floor((pick.align * slice.length) / Math.max(1, wordCount)))
 
   function merge(value: ReadPayload) {
     setCache((previous) => {
@@ -159,25 +168,26 @@ export default function Page() {
     const wordBox = node.getBoundingClientRect()
     const delta = wordBox.left + wordBox.width / 2 - (lineBox.left + lineBox.width / 2)
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    line.scrollBy({ left: delta, behavior: reduce ? 'auto' : 'smooth' })
+    const behavior = reduce || Math.abs(delta) > 240 ? 'auto' : 'smooth'
+    line.scrollBy({ left: delta, behavior })
   }, [hit, page])
 
-  async function onToken(index: number, lemma: string, translation?: string, align?: number) {
+  async function onToken(index: number, lemma: string, translation?: string, align?: number, ruAlign?: number) {
     if (!data?.hasTranslation) {
       const word = await selectWord(lemma)
       setEntry(word)
       setSaved(Boolean(word.saved))
-      setPick({ index, lemma, translation, align, phase: 'popup' })
+      setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
       return
     }
     if (pick?.index === index && pick.phase === 'gloss') {
       const word = await selectWord(lemma)
       setEntry(word)
       setSaved(Boolean(word.saved))
-      setPick({ index, lemma, translation, align, phase: 'popup' })
+      setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
       return
     }
-    setPick({ index, lemma, translation, align, phase: 'gloss' })
+    setPick({ index, lemma, translation, align, ruAlign, phase: 'gloss' })
   }
 
   async function addWord() {
@@ -219,16 +229,26 @@ export default function Page() {
       {finished ? <div className="bar"><i style={{ width: '100%' }} /></div> : null}
       {pick && data.hasTranslation ? (
         <div className={styles.parallel}>
-          {slice.length ? (
-            <div className={styles.line} ref={lineRef} onClick={() => setPick(null)}>
-              {slice.map((token, index) => (
-                <span key={index} data-word={index} className={hit === index ? styles.ruOn : undefined}>
-                  {index ? ' ' : ''}
-                  {token.text}
-                </span>
-              ))}
-            </div>
-          ) : null}
+          <div className={styles.ribbonRow}>
+            {slice.length ? (
+              <div className={styles.line} ref={lineRef} onClick={() => setPick(null)}>
+                {slice.map((token, index) => (
+                  <span key={index} data-word={index} className={hit === index ? styles.ruOn : undefined}>
+                    {index ? ' ' : ''}
+                    {token.text}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className={`icon-btn ${styles.ribbonClose}`}
+              aria-label="Скрыть перевод"
+              onClick={() => setPick(null)}
+            >
+              <X size={18} />
+            </button>
+          </div>
           {pick.translation ? (
             <div className={styles.gloss}>
               <b>{pick.lemma}</b>
@@ -245,7 +265,7 @@ export default function Page() {
                 key={index}
                 type="button"
                 className={pick?.index === index ? `${styles.token} ${styles.on}` : styles.token}
-                onClick={() => onToken(index, token.lemma!, token.translation, token.align)}
+                onClick={() => onToken(index, token.lemma!, token.translation, token.align, token.ruAlign)}
               >
                 {token.text}
               </button>

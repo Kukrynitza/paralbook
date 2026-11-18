@@ -146,6 +146,7 @@ export interface ReadToken {
   lemma?: string
   translation?: string
   align?: number
+  ruAlign?: number
 }
 
 export interface RuToken {

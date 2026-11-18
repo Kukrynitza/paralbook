@@ -77,7 +77,7 @@ test('chunk size is stored in the browser', async ({ page }) => {
 test('published text cannot be deleted from chat', async ({ page }) => {
   test.setTimeout(120000)
   await page.goto('http://localhost:5173/')
-  const card = await findCard(page, 'My Best Friend')
+  const card = await findCard(page, 'Mario and Pizza')
   await expect(card).toBeVisible({ timeout: 30000 })
   if (await card.getByRole('button', { name: 'Опубликовать в библиотеку' }).count()) {
     await card.getByRole('button', { name: 'Опубликовать в библиотеку' }).click()
@@ -85,7 +85,7 @@ test('published text cannot be deleted from chat', async ({ page }) => {
     await expect(page.getByText('Текст опубликован')).toBeVisible({ timeout: 30000 })
   }
   await page.goto('http://localhost:5173/chat')
-  const result = page.locator('article', { hasText: 'My Best Friend' }).first()
+  const result = page.locator('article', { hasText: 'Mario and Pizza' }).first()
   await expect(result).toBeVisible({ timeout: 30000 })
   await expect(result.getByText('В библиотеке', { exact: true })).toBeVisible()
   await expect(result.getByRole('button', { name: 'Удалить' })).toHaveCount(0)

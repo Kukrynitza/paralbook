@@ -130,7 +130,7 @@ export default async function selectText(textId: string, requestedPage?: number,
         .execute(),
       database
         .selectFrom('enTokens')
-        .select(['text', 'align'])
+        .select(['text', 'align', 'ruAlign'])
         .where('pageId', '=', pageId)
         .orderBy('position', 'asc')
         .execute(),
@@ -186,6 +186,7 @@ export default async function selectText(textId: string, requestedPage?: number,
           lemma: match?.lemma,
           translation: match?.translation ?? undefined,
           align: row.align ?? undefined,
+          ruAlign: row.ruAlign ?? undefined,
         })
       }
     }

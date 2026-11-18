@@ -73,11 +73,11 @@ export default async function globalTeardown() {
       [userId],
     )
     await client.query(
-      "update texts set published=false where owner_id=$1 and title='My Best Friend'",
+      "update texts set published=true where owner_id=$1 and title='Mario and Pizza'",
       [userId],
     )
     await client.query(
-      "update collection_items set source='chat' where user_id=$1 and text_id in (select id from texts where owner_id=$1 and title='My Best Friend')",
+      "update collection_items set source='chat' where user_id=$1 and text_id in (select id from texts where owner_id=$1 and title='Mario and Pizza')",
       [userId],
     )
     await client.query('delete from user_themes where user_id=$1', [userId]).catch(() => undefined)

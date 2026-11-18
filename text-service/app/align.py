@@ -7,6 +7,16 @@ from .dictionary import Dictionary
 
 PAGE_WORDS = 450
 
+FUNCTION_WORDS = frozenset("""
+a an the and or but if then than so because as of in on at to from by with without
+for about into over under between after before during is are was were be been being am
+do does did done have has had having can could may might must shall should will would
+i you he she it we they me him her us them my your his its our their this that these those
+there here who which what when where why how not no yes all any some each every both few
+many much more most other another such own same only too very just also up out off again
+once ever never always often sometimes now still yet already even well back away down further
+""".split())
+
 
 @dataclass
 class Pair:
@@ -127,6 +137,40 @@ def _page_text(pairs: list[Pair], en_words: list[str]) -> str:
     return "".join(parts)
 
 
+def _ru_form_index(ru_words: list[dict], start: int, end: int) -> dict[str, list[int]]:
+    index: dict[str, list[int]] = {}
+    for local, item in enumerate(ru_words[start:end]):
+        for form in item["forms"]:
+            index.setdefault(form, []).append(local)
+    return index
+
+
+def _page_targets(ru_words: list[dict], en_words: list[dict], en_start: int, en_end: int,
+                  ru_start: int, ru_end: int, dictionary: Dictionary) -> dict[int, int]:
+    en_count = max(0, en_end - en_start)
+    ru_count = max(0, ru_end - ru_start)
+    if not en_count or not ru_count:
+        return {}
+    forms = _ru_form_index(ru_words, ru_start, ru_end)
+    targets: dict[int, int] = {}
+    for en_index in range(max(0, en_start), min(len(en_words), en_end)):
+        lemma = en_words[en_index].get("lemma")
+        if not lemma:
+            continue
+        offset = en_index - en_start
+        expected = offset / max(1, en_count - 1) * max(0, ru_count - 1)
+        nearest = min(ru_count - 1, max(0, round(expected)))
+        candidates = set() if lemma in FUNCTION_WORDS else dictionary.candidates(lemma)
+        positions: set[int] = set()
+        for form in candidates:
+            positions.update(forms.get(form, ()))
+        if positions:
+            targets[en_index] = min(positions, key=lambda local: (abs(local - expected), local))
+        else:
+            targets[en_index] = nearest
+    return targets
+
+
 def align_pages(english: str, russian: str, dictionary: Dictionary) -> list[dict]:
     en_texts = segment.words(english)
     en_words = [{"text": text, "norm": segment.bare(text)} for text in en_texts]
@@ -135,7 +179,6 @@ def align_pages(english: str, russian: str, dictionary: Dictionary) -> list[dict
 
     has_translation = bool(russian.strip())
     ru_words: list[dict] = []
-    targets: list[int | None] = [None] * len(en_words)
 
     if not has_translation:
         pairs = _english_pairs(english)
@@ -148,35 +191,6 @@ def align_pages(english: str, russian: str, dictionary: Dictionary) -> list[dict
             ru_texts = segment.words(russian)
             ru_words = [{"text": text, "norm": segment.bare(text), "forms": morph.normal_forms(text)}
                         for text in ru_texts]
-            for pair in pairs:
-                ru_start = max(0, min(len(ru_words), pair.ru_start))
-                ru_end = max(ru_start, min(len(ru_words), pair.ru_end))
-                if not (ru_start < ru_end):
-                    continue
-                cursor = ru_start
-                span = max(1, pair.en_end - pair.en_start)
-                for en_index in range(max(0, pair.en_start), min(len(en_words), pair.en_end)):
-                    offset = en_index - pair.en_start
-                    candidates = dictionary.candidates(en_words[en_index].get("lemma"))
-                    match = None
-                    if candidates:
-                        for ru_index in range(cursor, ru_end):
-                            if ru_words[ru_index]["forms"] & candidates:
-                                match = ru_index
-                                break
-                        if match is None:
-                            expected = ru_start + round(offset * (ru_end - ru_start) / span)
-                            for distance in range(0, ru_end - ru_start):
-                                for ru_index in (expected - distance, expected + distance):
-                                    if ru_start <= ru_index < ru_end and ru_words[ru_index]["forms"] & candidates:
-                                        match = ru_index
-                                        break
-                                if match is not None:
-                                    break
-                    if match is None:
-                        match = min(ru_end - 1, ru_start + round(offset * (ru_end - ru_start) / span))
-                    targets[en_index] = match
-                    cursor = max(cursor, match + 1)
 
     if not pairs:
         return []
@@ -192,19 +206,26 @@ def align_pages(english: str, russian: str, dictionary: Dictionary) -> list[dict
         ru_tokens = segment.pieces(" ".join(item["text"] for item in ru_slice)) if ru_slice else []
         en_count = max(0, en_end - en_start)
         ru_count = max(0, ru_end - ru_start)
+        targets = _page_targets(ru_words, en_words, en_start, en_end, ru_start, ru_end, dictionary) \
+            if has_translation and ru_count else {}
         en_tokens = []
         word_index = en_start
         for token_text in segment.pieces(page_text):
             if token_text.isspace():
-                en_tokens.append({"text": token_text, "lemma": None, "align": None})
+                en_tokens.append({"text": token_text, "lemma": None, "align": None,
+                                  "ru_align": None})
                 continue
             item = en_words[word_index] if word_index < len(en_words) else {"text": token_text, "lemma": None}
-            target = targets[word_index] if word_index < len(targets) else None
+            local = targets.get(word_index)
             align = None
-            if has_translation and target is not None and ru_count:
-                local = max(0, min(ru_count - 1, target - ru_start))
-                align = min(en_count - 1, max(0, round(local * en_count / ru_count))) if en_count else None
-            en_tokens.append({"text": token_text, "lemma": item.get("lemma"), "align": align})
+            if local is not None and ru_count:
+                align = min(en_count - 1, max(0, round(local * en_count / ru_count)))
+            en_tokens.append({
+                "text": token_text,
+                "lemma": item.get("lemma"),
+                "align": align,
+                "ru_align": local,
+            })
             word_index += 1
         result.append({"position": page_index, "en": en_tokens, "ru": [{"text": item} for item in ru_tokens]})
     return result

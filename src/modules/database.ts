@@ -53,6 +53,7 @@ export interface EnTokens {
   text: string
   lemma: string | null
   align: number | null
+  ruAlign: number | null
 }
 
 export interface Lemmas {

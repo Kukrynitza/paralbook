@@ -63,9 +63,12 @@ class Dictionary:
         value = morph.clean_word(form)
         if not value:
             return None
+        mapped = self.form_to_lemma.get(value)
+        if mapped:
+            return mapped
         if value in self.lemma_set:
             return value
-        return self.form_to_lemma.get(value)
+        return None
 
     def candidates(self, lemma: str | None) -> set[str]:
         if not lemma:

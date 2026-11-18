@@ -67,7 +67,20 @@
   background: var(--surface);
 }
 
+.ribbonRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ribbonClose {
+  flex: none;
+  margin: 10px 8px 0 0;
+}
+
 .line {
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
   white-space: nowrap;
   padding: 12px 40% 4px;
