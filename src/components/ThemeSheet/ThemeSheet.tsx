@@ -78,24 +78,24 @@ export default function ThemeSheet({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <div className={styles.body}>
-          <div className={styles.preview}>
-            <div className={styles.previewTop}>
-              <b>Пример карточки</b>
-              <span className="chip on">B1</span>
-            </div>
-            <p>Текст на выбранном фоне. Так будут выглядеть карточки и кнопки в приложении.</p>
-            <div className="actions">
-              <button className="btn slim" type="button">
-                Читать
-              </button>
-              <button className="btn soft slim" type="button">
-                В словарь
-              </button>
-            </div>
-          </div>
 
           {tab === 'theme' ? (
             <>
+              <div className={styles.preview}>
+                <div className={styles.previewTop}>
+                  <b>Пример карточки</b>
+                  <span className="chip on">B1</span>
+                </div>
+                <p>Текст на выбранном фоне. Так будут выглядеть карточки и кнопки в приложении.</p>
+                <div className="actions">
+                  <button className="btn slim" type="button">
+                    Читать
+                  </button>
+                  <button className="btn soft slim" type="button">
+                    В словарь
+                  </button>
+                </div>
+              </div>
               <div className={styles.block}>
                 <span className={styles.blockTitle}>Режим</span>
                 <div className={styles.modes}>
