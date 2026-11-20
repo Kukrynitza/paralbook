@@ -7,8 +7,10 @@ import practiceWord from '@/actions/Training/practiceWord'
 import recordStudy from '@/actions/Training/recordStudy'
 import selectStudyCard from '@/actions/Training/selectStudyCard'
 import studyDeck, { type StudyDeck } from '@/actions/Training/studyDeck'
+import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import WordCard from '@/components/WordCard/WordCard'
 import { useAuth, useUi } from '@/contexts/AuthContext'
+import { addExtra, markCompleted, markReviewed, markTarget, readDayState, remainingNew } from '@/sorse/daily'
 import { readDailyNew } from '@/sorse/prefs'
 import { type SessionCard } from '@/sorse/types'
 import styles from './page.module.css'
@@ -19,7 +21,20 @@ const MODES = [
   ['review', 'Повторение'],
 ] as const
 
-const NO_WORDS: string[] = []
+type Phase = 'collect' | 'repeat' | 'review' | 'done'
+
+function interleave(newItems: string[], dueItems: Iterable<string>) {
+  const fresh = newItems.slice()
+  const due = [...dueItems]
+  const result: string[] = []
+  let left = 0
+  let right = 0
+  while (left < fresh.length || right < due.length) {
+    if (left < fresh.length) result.push(fresh[left++])
+    if (right < due.length) result.push(due[right++])
+  }
+  return result
+}
 
 export default function Page() {
   return (
@@ -34,105 +49,136 @@ function Study() {
   const search = useSearchParams()
   const { user } = useAuth()
   const { notify } = useUi()
+  const owner = user?.id
   const mode = search.get('mode') || 'mixed'
   const extra = search.get('extra') === '1'
+  const kind = extra ? 'learn' : mode
   const [packs, setPacks] = useState<string[]>(() => (search.get('packs') || '').split(',').filter(Boolean))
   const [daily, setDaily] = useState(10)
-  const [deck, setDeck] = useState<StudyDeck | null>(null)
-  const [lockUntil, setLockUntil] = useState<string | null>(null)
+  const [plan, setPlan] = useState(10)
+  const [completed, setCompleted] = useState<string[]>([])
+  const [phase, setPhase] = useState<Phase>('collect')
+  const [queue, setQueue] = useState<string[]>([])
   const [index, setIndex] = useState(0)
+  const [deck, setDeck] = useState<StudyDeck | null>(null)
+  const [reviewDone, setReviewDone] = useState(0)
+  const [reviewTotal, setReviewTotal] = useState(0)
   const [card, setCard] = useState<SessionCard | null>(null)
   const [flipped, setFlipped] = useState(false)
   const [translation, setTranslation] = useState(false)
   const [hintSeen, setHintSeen] = useState(false)
   const [error, setError] = useState('')
   const [leave, setLeave] = useState<'no' | 'yes' | null>(null)
+  const [reload, setReload] = useState(0)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [moreCount, setMoreCount] = useState(10)
+  const dueSet = useRef(new Set<string>())
   const cache = useRef(new Map<string, SessionCard>())
-  const missed = useRef(false)
-  const openMisses = useRef(new Set<string>())
-  const posted = useRef(new Set<string>())
-  const lockAt = useRef<number | null>(null)
+  const posted = useRef(new Map<string, boolean>())
+  const pending = useRef(new Map<string, Promise<void>>())
   const started = useRef(Date.now())
   const recorded = useRef(false)
-  const [replay, setReplay] = useState<string[] | null>(null)
-  const words = replay ?? deck?.lemmas ?? NO_WORDS
-
-  useEffect(() => {
-    setDaily(readDailyNew())
-  }, [])
+  const words = queue
 
   useEffect(() => {
     if (!user) return
-    setPacks((current) => (current.length ? current : [user.cefr]))
+    setPacks((current) => (current.length ? current : ['own', user.cefr]))
   }, [user])
 
   useEffect(() => {
     let active = true
-    setIndex(0)
-    setReplay(null)
     setError('')
-    const dailyCount = Number(search.get('daily')) || readDailyNew()
     setCard(null)
-    if (mode === 'review' && !extra) {
-      const stored = window.localStorage.getItem('paralbook.studyLock')
-      if (stored && new Date(stored).getTime() > Date.now()) {
-        setLockUntil(stored)
-        setDeck(null)
-        studyDeck(packs, '', dailyCount)
-          .then((next) => {
-            if (!active) return
-            setDeck(next)
-            if (!next.nextDueAt) return
-            const server = new Date(next.nextDueAt).getTime()
-            const local = new Date(stored).getTime()
-            if (server > Date.now() && server < local) {
-              window.localStorage.setItem('paralbook.studyLock', next.nextDueAt)
-              setLockUntil(next.nextDueAt)
-            }
-          })
-          .catch(() => undefined)
-        return () => {
-          active = false
+    setIndex(0)
+    setQueue([])
+    dueSet.current.clear()
+    setReviewDone(0)
+    setReviewTotal(0)
+    setPhase('collect')
+    setDeck(null)
+    setLeave(null)
+    cache.current.clear()
+    posted.current.clear()
+    started.current = Date.now()
+    recorded.current = false
+    const base = Number(search.get('daily')) || readDailyNew(owner)
+    const day = readDayState(owner)
+    const nextPlan = base + day.extra
+    const budget = kind === 'review' ? 0 : remainingNew(base, day)
+    setDaily(base)
+    setPlan(nextPlan)
+    setCompleted(day.completed)
+    const pendingTargets = day.targets.filter((lemma) => !day.completed.includes(lemma))
+    const load = (next: StudyDeck) => {
+      if (!active) return
+      setDeck(next)
+      const due = kind === 'mixed'
+        ? next.due.filter((lemma) => !pendingTargets.includes(lemma))
+        : kind === 'review'
+          ? next.due
+          : []
+      dueSet.current = new Set(due)
+      const startReview = day.reviewed.length
+      if (kind === 'review') {
+        const total = startReview + next.due.length
+        setReviewDone(startReview)
+        setReviewTotal(total)
+        setQueue(due)
+        setPhase(due.length ? 'review' : 'done')
+        return
+      }
+      if (kind === 'mixed') {
+        const remaining = Math.max(0, nextPlan - day.completed.length)
+        const total = startReview + next.due.length + remaining
+        setReviewDone(startReview)
+        setReviewTotal(total)
+      }
+      if (pendingTargets.length) {
+        setQueue(kind === 'mixed' ? interleave(pendingTargets, due) : pendingTargets)
+        setPhase('repeat')
+        return
+      }
+      if (budget > 0) {
+        if (next.fresh.length) {
+          setQueue(kind === 'mixed' ? interleave(next.fresh, due) : next.fresh)
+          setPhase('collect')
+          return
+        }
+        if (kind === 'mixed' && due.length) {
+          setQueue(due)
+          setPhase('collect')
+          return
         }
       }
-      window.localStorage.removeItem('paralbook.studyLock')
+      if (kind === 'mixed' && due.length) {
+        setQueue(due)
+        setPhase('review')
+        return
+      }
+      setPhase('done')
     }
-    setLockUntil(null)
-    setDeck(null)
-    setReplay(null)
-    studyDeck(packs, extra ? 'learn' : mode, dailyCount, extra)
-      .then((next) => {
-        if (!active) return
-        setDeck(next)
-        if (mode === 'review' && !extra && next.lemmas.length === 0 && next.nextDueAt && new Date(next.nextDueAt).getTime() > Date.now()) {
-          window.localStorage.setItem('paralbook.studyLock', next.nextDueAt)
-          setLockUntil(next.nextDueAt)
-        }
-      })
+    const request = kind === 'review'
+      ? studyDeck(packs, 'review', 0)
+      : studyDeck(packs, kind === 'mixed' ? 'mixed' : 'learn', budget)
+    request
+      .then(load)
       .catch((reason: unknown) => {
+        if (!active) return
         const message = reason instanceof Error ? reason.message : 'Не удалось собрать колоду'
         notify(message)
-        if (active) setError(message)
+        setError(message)
       })
     return () => {
       active = false
     }
-  }, [mode, packs, search, notify, extra])
-
-  useEffect(() => {
-    cache.current.clear()
-    missed.current = false
-    openMisses.current.clear()
-    posted.current.clear()
-    lockAt.current = null
-    started.current = Date.now()
-    recorded.current = false
-    setLeave(null)
-  }, [deck])
+  }, [kind, packs, search, notify, reload, owner])
 
   useEffect(() => {
     const lemma = words[index]
-    if (!mode || !lemma) return
+    if (!lemma) {
+      setCard(null)
+      return
+    }
     let active = true
     setFlipped(false)
     setTranslation(false)
@@ -150,19 +196,21 @@ function Study() {
           if (active) setError(reason instanceof Error ? reason.message : 'Не удалось открыть карточку')
         })
     }
-    for (const nextLemma of words.slice(index + 1, index + 3)) {
-      if (cache.current.has(nextLemma)) continue
-      selectStudyCard(nextLemma)
-        .then((next) => cache.current.set(nextLemma, next))
-        .catch(() => undefined)
-    }
     return () => {
       active = false
     }
-  }, [words, index, mode])
+  }, [words, index])
 
-  function switchMode(next: string) {
+  useEffect(() => {
+    if (phase !== 'done' || recorded.current) return
+    recorded.current = true
+    const elapsed = Math.max(1, Math.round((Date.now() - started.current) / 60000))
+    void recordStudy(elapsed).catch(() => undefined)
+  }, [phase])
+
+  async function switchMode(next: string) {
     if (next === mode) return
+    await Promise.allSettled([...pending.current.values()])
     const query = new URLSearchParams({
       mode: next,
       packs: packs.join(','),
@@ -171,103 +219,242 @@ function Study() {
     router.push(`/study?${query.toString()}`)
   }
 
-  function answer(remembered: boolean) {
-    if (!card || leave) return
-    const gaps = [
-      { minutes: 30, label: '30 минут' },
-      { minutes: 12 * 60, label: '12 часов' },
-      { minutes: 24 * 60, label: '1 день' },
-      { minutes: 7 * 24 * 60, label: '7 дней' },
-      { minutes: 30 * 24 * 60, label: '30 дней' },
-      { minutes: 60 * 24 * 60, label: '2 месяца' },
-    ]
-    const lemma = card.lemma
-    const review = card.review
-    const atIndex = index
-    const queue = words
-    setLeave(remembered ? 'yes' : 'no')
-    const motion = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    window.setTimeout(() => {
-      if (!remembered) {
-        openMisses.current.add(lemma)
-        missed.current = true
-        const at = Math.min(atIndex + 5, queue.length)
-        const next = queue.slice()
-        next.splice(at, 0, lemma)
-        setReplay(next)
-      } else {
-        openMisses.current.delete(lemma)
-        missed.current = openMisses.current.size > 0
-        if (review < 6) {
-          const gap = gaps[Math.min(review, gaps.length - 1)]
-          const at = Date.now() + gap.minutes * 60_000
-          if (!lockAt.current || at < lockAt.current) lockAt.current = at
-        }
-        post(lemma, true)
-      }
-      const nextLemma = queue[atIndex + 1]
-      const nextCard = nextLemma ? cache.current.get(nextLemma) : undefined
-      setFlipped(false)
-      setTranslation(false)
-      if (nextCard) setCard(nextCard)
-      else if (nextLemma) setCard(null)
-      setIndex(atIndex + 1)
-      setLeave(null)
-    }, motion ? 480 : 0)
-  }
-
   function post(lemma: string, remembered: boolean) {
-    if (posted.current.has(lemma)) return
-    posted.current.add(lemma)
-    void practiceWord(lemma, remembered).catch((reason: unknown) => {
-      posted.current.delete(lemma)
-      notify(reason instanceof Error ? reason.message : 'Не удалось сохранить ответ')
+    if (posted.current.get(lemma) === remembered) return
+    posted.current.set(lemma, remembered)
+    const previous = pending.current.get(lemma) ?? Promise.resolve()
+    const task = previous
+      .catch(() => undefined)
+      .then(() => practiceWord(lemma, remembered))
+      .catch((reason: unknown) => {
+        if (posted.current.get(lemma) === remembered) posted.current.delete(lemma)
+        notify(reason instanceof Error ? reason.message : 'Не удалось сохранить ответ')
+      })
+    pending.current.set(lemma, task)
+    void task.finally(() => {
+      if (pending.current.get(lemma) === task) pending.current.delete(lemma)
     })
   }
 
-  useEffect(() => {
-    if (!deck || !mode || words.length === 0 || index < words.length || recorded.current) return
-    recorded.current = true
-    for (const lemma of openMisses.current) post(lemma, false)
-    const elapsed = Math.max(1, Math.round((Date.now() - started.current) / 60000))
-    void recordStudy(elapsed).catch(() => undefined)
-    if (!missed.current && lockAt.current && lockAt.current > Date.now()) {
-      const iso = new Date(lockAt.current).toISOString()
-      window.localStorage.setItem('paralbook.studyLock', iso)
-      setLockUntil(iso)
-      return
-    }
-    if (missed.current) {
-      window.localStorage.removeItem('paralbook.studyLock')
-      setLockUntil(null)
-    }
-  }, [deck, index, mode, words])
-
-  function expireLock() {
-    window.localStorage.removeItem('paralbook.studyLock')
-    lockAt.current = null
-    setLockUntil(null)
-    setIndex(0)
-    setError('')
-    setDeck(null)
-    setReplay(null)
-    const dailyCount = Number(search.get('daily')) || readDailyNew()
-    studyDeck(packs, mode, dailyCount)
-      .then((next) => {
-        setDeck(next)
-        if (mode === 'review' && next.lemmas.length === 0 && next.nextDueAt && new Date(next.nextDueAt).getTime() > Date.now()) {
-          window.localStorage.setItem('paralbook.studyLock', next.nextDueAt)
-          setLockUntil(next.nextDueAt)
-        }
-      })
-      .catch((reason: unknown) => {
-        setError(reason instanceof Error ? reason.message : 'Не удалось собрать колоду')
-      })
+  function resetCardView() {
+    setLeave(null)
+    setFlipped(false)
+    setTranslation(false)
+    setCard(null)
   }
 
-  const finished = deck && index >= words.length && words.length > 0
-  const sessionUntil = finished && !missed.current && lockAt.current && lockAt.current > Date.now() ? new Date(lockAt.current).toISOString() : null
-  const reviewLock = mode === 'review' ? sessionUntil || (lockUntil && new Date(lockUntil).getTime() > Date.now() ? lockUntil : null) : null
+  async function loadMoreFresh() {
+    const day = readDayState(owner)
+    const budget = remainingNew(daily, day)
+    if (budget <= 0) return false
+    const next = await studyDeck(packs, 'learn', budget)
+    setDeck(next)
+    if (!next.fresh.length) return false
+    resetCardView()
+    setQueue(kind === 'mixed' ? interleave(next.fresh, dueSet.current) : next.fresh)
+    setIndex(0)
+    setPhase('collect')
+    return true
+  }
+
+  async function finishCollect(lastLemma?: string) {
+    await Promise.allSettled([...pending.current.values()])
+    const day = readDayState(owner)
+    setCompleted(day.completed)
+    const pendingTargets = day.targets.filter((lemma) => !day.completed.includes(lemma))
+    const ordered = lastLemma && pendingTargets.length > 1 && pendingTargets.includes(lastLemma)
+      ? [...pendingTargets.filter((lemma) => lemma !== lastLemma), lastLemma]
+      : pendingTargets
+    const due = [...dueSet.current]
+    const budget = remainingNew(daily, day)
+    resetCardView()
+    if (ordered.length) {
+      setQueue(kind === 'mixed' ? interleave(ordered, due) : ordered)
+      setIndex(0)
+      setPhase('repeat')
+      return
+    }
+    if (budget > 0 && deck?.hasMoreFresh && await loadMoreFresh()) return
+    if (kind === 'mixed' && due.length) {
+      setQueue(due)
+      setIndex(0)
+      setPhase('review')
+      return
+    }
+    setQueue([])
+    setPhase('done')
+  }
+
+  async function finishRepeat() {
+    await Promise.allSettled([...pending.current.values()])
+    const day = readDayState(owner)
+    setCompleted(day.completed)
+    const pendingTargets = day.targets.filter((lemma) => !day.completed.includes(lemma))
+    const due = [...dueSet.current]
+    const budget = remainingNew(daily, day)
+    resetCardView()
+    if (pendingTargets.length) {
+      setQueue(kind === 'mixed' ? interleave(pendingTargets, due) : pendingTargets)
+      setIndex(0)
+      setPhase('repeat')
+      return
+    }
+    if (budget > 0 && deck?.hasMoreFresh && await loadMoreFresh()) return
+    if (kind === 'mixed' && due.length) {
+      setQueue(due)
+      setIndex(0)
+      setPhase('review')
+      return
+    }
+    setQueue([])
+    setPhase('done')
+  }
+
+  async function finishReview() {
+    resetCardView()
+    setQueue([])
+    await Promise.allSettled([...pending.current.values()])
+    if (kind !== 'review') {
+      setPhase('done')
+      return
+    }
+    try {
+      const next = await studyDeck(packs, 'review', 0)
+      setDeck(next)
+      const day = readDayState(owner)
+      const startReview = day.reviewed.length
+      setReviewDone(startReview)
+      setReviewTotal(startReview + next.due.length)
+      if (next.due.length) {
+        dueSet.current = new Set(next.due)
+        setQueue(next.due)
+        setIndex(0)
+        setPhase('review')
+        return
+      }
+    } catch {
+      setReload((value) => value + 1)
+      return
+    }
+    setPhase('done')
+  }
+
+  function answer(remembered: boolean) {
+    if (!card || leave || phase === 'done') return
+    const lemma = card.lemma
+    const atIndex = index
+    const currentPhase = phase
+    const isDue = dueSet.current.has(lemma)
+    const isNew = !isDue && (currentPhase === 'collect' || currentPhase === 'repeat')
+    if (remembered) {
+      if (isDue || kind === 'mixed') {
+        const next = markReviewed(lemma, owner)
+        setReviewDone(next.reviewed.length)
+      }
+      if (isNew) {
+        const next = markCompleted(lemma, owner)
+        setCompleted(next.completed)
+      }
+      if (isDue) dueSet.current.delete(lemma)
+      post(lemma, true)
+    } else {
+      if (currentPhase === 'collect' && !isDue) {
+        markTarget(lemma, owner)
+      }
+      post(lemma, false)
+    }
+    setLeave(remembered ? 'yes' : 'no')
+    const motion = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    window.setTimeout(() => {
+      if (!remembered && (isDue || currentPhase === 'repeat' || currentPhase === 'review')) {
+        const rest = words.slice(atIndex + 1)
+        setQueue([...rest, lemma])
+        setIndex(0)
+        setLeave(null)
+        return
+      }
+      if (currentPhase === 'collect') {
+        const day = readDayState(owner)
+        if (!isDue && remainingNew(daily, day) <= 0) {
+          const pendingTargets = day.targets.filter((item) => !day.completed.includes(item))
+          const ordered = pendingTargets.length > 1 && pendingTargets.includes(lemma)
+            ? [...pendingTargets.filter((item) => item !== lemma), lemma]
+            : pendingTargets
+          resetCardView()
+          setQueue(kind === 'mixed' ? interleave(ordered, dueSet.current) : ordered)
+          setIndex(0)
+          setPhase('repeat')
+          return
+        }
+        const nextIndex = atIndex + 1
+        if (nextIndex < words.length) {
+          setIndex(nextIndex)
+          setLeave(null)
+          return
+        }
+        void finishCollect(lemma)
+        return
+      }
+      const nextIndex = atIndex + 1
+      if (nextIndex < words.length) {
+        setIndex(nextIndex)
+        setLeave(null)
+        return
+      }
+      if (currentPhase === 'repeat') {
+        void finishRepeat()
+        return
+      }
+      void finishReview()
+    }, motion ? 480 : 0)
+  }
+
+  function confirmMore() {
+    addExtra(moreCount, owner)
+    setMoreOpen(false)
+    setReload((value) => value + 1)
+  }
+
+  function moreDialog() {
+    return (
+      <ConfirmDialog
+        open={moreOpen}
+        title="Добавить ещё новых слов?"
+        confirmLabel="Добавить"
+        onClose={() => setMoreOpen(false)}
+        onConfirm={confirmMore}
+      >
+        <p>Сколько новых слов добавить сверх лимита на сегодня?</p>
+        <div className="gap8">
+          {[5, 10, 15, 20].map((value) => (
+            <button
+              key={value}
+              type="button"
+              className={moreCount === value ? 'chip on' : 'chip'}
+              onClick={() => setMoreCount(value)}
+            >
+              +{value}
+            </button>
+          ))}
+        </div>
+        <label className="field" style={{ marginTop: 12 }}>
+          <span>Своё количество</span>
+          <input
+            className="input compact"
+            type="number"
+            min={1}
+            max={60}
+            value={moreCount}
+            onChange={(event) => setMoreCount(Math.max(1, Math.min(60, Number(event.target.value) || 1)))}
+          />
+        </label>
+      </ConfirmDialog>
+    )
+  }
+
+  const reviewLock = kind === 'review' && phase === 'done' && deck?.nextDueAt && new Date(deck.nextDueAt).getTime() > Date.now()
+    ? deck.nextDueAt
+    : null
 
   function screen(body: ReactNode, counter?: string) {
     return (
@@ -281,12 +468,18 @@ function Study() {
         </header>
         <div className={styles.modes}>
           {MODES.map(([id, label]) => (
-            <button key={id} className={mode === id ? 'chip on' : 'chip'} onClick={() => switchMode(id)}>
+            <button
+              key={id}
+              className={mode === id ? 'chip on' : 'chip'}
+              data-tip={id === 'learn' ? 'Только новые слова' : id === 'review' ? 'Только повторение' : 'Новые и повторение вместе'}
+              onClick={() => void switchMode(id)}
+            >
               {label}
             </button>
           ))}
         </div>
         {body}
+        {moreDialog()}
       </div>
     )
   }
@@ -304,34 +497,42 @@ function Study() {
     return screen(
       <Wait
         until={reviewLock}
-        newToday={deck?.newToday ?? 0}
+        newToday={completed.length}
         onLater={() => router.push('/vocabulary')}
-        onExpire={expireLock}
+        onExpire={() => setReload((value) => value + 1)}
       />,
     )
   }
 
-  if (deck && deck.lemmas.length === 0) {
+  if (phase === 'done' || (!words.length && phase !== 'collect' && phase !== 'review')) {
     return screen(
-      <div className="empty">
-        <h2>Слов нет</h2>
-        <p>В выбранных пачках нет новых слов, и сейчас нечего повторять.</p>
-      </div>,
+      <StudyDone
+        mode={kind}
+        plan={plan}
+        completed={completed.length}
+        reviewDone={reviewDone}
+        reviewTotal={reviewTotal}
+        nextMinutes={deck?.nextMinutes ?? null}
+        onMore={() => {
+          setMoreCount(10)
+          setMoreOpen(true)
+        }}
+        onReview={() => void switchMode('review')}
+        onLearn={() => void switchMode('learn')}
+        onVocabulary={() => router.push('/vocabulary')}
+      />,
+      kind === 'learn' ? `${completed.length}/${plan}` : `${reviewDone}/${reviewTotal}`,
     )
   }
 
-  if (finished) {
-    return screen(
-      <div className="empty">
-        <h2>Пока всё</h2>
-        <p>{missed.current ? 'Слова, на которые нажали «Не знаю», можно повторить сразу.' : 'Карточки этой пачки пройдены.'}</p>
-      </div>,
-    )
-  }
+  if (!card || !words.length) return screen(<p className="loading">Загрузка…</p>)
 
-  if (!card || !deck) return screen(<p className="loading">Загрузка…</p>)
-
-  const reviewLabel = mode === 'review' || (mode === 'mixed' && card.review > 0) ? `Повтор ${Math.min(6, card.review + 1)}` : null
+  const reviewLabel = phase === 'repeat'
+    ? 'Повтор нового'
+    : phase === 'review' || (kind === 'mixed' && card.review > 0)
+      ? `Повтор ${Math.min(6, card.review + 1)}`
+      : null
+  const counter = kind === 'learn' ? `${completed.length}/${plan}` : `${reviewDone}/${reviewTotal}`
 
   return screen(
     <>
@@ -363,7 +564,7 @@ function Study() {
         </button>
       </div>
     </>,
-    `${index + 1}/${words.length}`,
+    counter,
   )
 }
 
@@ -387,6 +588,74 @@ function useMinuteCountdown(until: string) {
   return left
 }
 
+function StudyDone({
+  mode,
+  plan,
+  completed,
+  reviewDone,
+  reviewTotal,
+  nextMinutes,
+  onMore,
+  onReview,
+  onLearn,
+  onVocabulary,
+}: {
+  mode: string
+  plan: number
+  completed: number
+  reviewDone: number
+  reviewTotal: number
+  nextMinutes: number | null
+  onMore: () => void
+  onReview: () => void
+  onLearn: () => void
+  onVocabulary: () => void
+}) {
+  const review = mode === 'review'
+  const mixed = mode === 'mixed'
+  const full = !review && completed >= plan
+  const title = review
+    ? 'Повторение на сегодня закончено'
+    : mixed
+      ? 'Смешанное пройдено'
+      : full
+        ? 'План новых слов выполнен'
+        : 'Пока всё'
+  const text = review
+    ? `Повторено: ${reviewDone}/${reviewTotal}.`
+    : mixed
+      ? `Пройдено: ${reviewDone}/${reviewTotal}. Новых слов: ${completed}/${plan}.`
+      : full
+        ? `Вы прошли новые слова: ${completed}/${plan}. Они добавлены в повторение.`
+        : `Новых слов: ${completed}/${plan}. В выбранных пачках больше нет новых кандидатов.`
+  return (
+    <div className="empty">
+      <h2>{title}</h2>
+      <p>{text}</p>
+      {nextMinutes !== null ? <p className="small muted">Следующее повторение примерно через {nextMinutes} мин.</p> : null}
+      <div className="actions" style={{ width: '100%' }}>
+        {!review ? (
+          <button className="btn" onClick={onMore}>
+            Добавить ещё новых
+          </button>
+        ) : null}
+        {review ? (
+          <button className="btn ghost" onClick={onLearn}>
+            Новые слова
+          </button>
+        ) : (
+          <button className="btn ghost" onClick={onReview}>
+            Повторение
+          </button>
+        )}
+        <button className="btn ghost" onClick={onVocabulary}>
+          В словарь
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function Wait({
   until,
   newToday,
@@ -404,15 +673,25 @@ function Wait({
   useEffect(() => {
     if (left === 0) expire.current()
   }, [left])
+  useEffect(() => {
+    const sync = () => {
+      if (minutesLeft(until) === 0) expire.current()
+    }
+    window.addEventListener('focus', sync)
+    document.addEventListener('visibilitychange', sync)
+    return () => {
+      window.removeEventListener('focus', sync)
+      document.removeEventListener('visibilitychange', sync)
+    }
+  }, [until])
   return (
     <div className="pad stack">
       <h2 style={{ margin: 0, textAlign: 'center' }}>Рано повторять</h2>
       <p style={{ textAlign: 'center' }}>Следующие слова откроются через {left} мин.</p>
-      <p className="muted" style={{ textAlign: 'center' }}>Сегодня новых слов: {newToday}.</p>
+      <p className="muted" style={{ textAlign: 'center' }}>Новых слов за сегодня: {newToday}.</p>
       <button className="btn ghost" onClick={onLater}>
         Вернуться позже
       </button>
     </div>
   )
 }
-

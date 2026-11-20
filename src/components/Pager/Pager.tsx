@@ -88,6 +88,7 @@ export default function Pager({
             className={styles.input}
             inputMode="numeric"
             aria-label="Номер страницы"
+            data-tip="Введите номер страницы"
             value={draft}
             disabled={backOff && forwardOff}
             onChange={(event) => setDraft(event.target.value.replace(/\D/g, '').slice(0, String(pages).length))}

@@ -39,18 +39,13 @@ export default async function insertUser(user: InsertUser) {
     .returning(['id'])
     .executeTakeFirstOrThrow()
 
-  await database.insertInto('chatMessages').values({
-    userId: registration.id,
-    role: 'assistant',
-    body: 'На какую тему сделать текст и сколько минут его читать?'
-  }).execute()
-
   const expiresAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
   const token = await jwt({ id: registration.id })
   const cookieStore = await cookies()
   cookieStore.set('session', token, {
     expires: expiresAt,
     httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
     path: '/',
     sameSite: 'lax'
   })

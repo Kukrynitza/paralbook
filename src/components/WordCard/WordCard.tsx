@@ -1,5 +1,6 @@
 import { Eye, RotateCcw, Volume2 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { speak } from '@/sorse/speech'
 import type { SessionCard } from '@/sorse/types'
 import styles from '@/app/study/page.module.css'
 
@@ -65,7 +66,7 @@ export default function WordCard({
               <div key={item.textEn} className={showTranslation ? styles.pair : styles.sample}>
                 <p className={styles.spoken}>
                   <span>{paint(item.textEn, [card.lemma])}</span>
-                  <button type="button" className={styles.speak} aria-label="Произнести пример" onClick={() => pronounce(item.textEn)}>
+                  <button type="button" className={styles.speak} aria-label="Произнести пример" onClick={() => speak(item.textEn)}>
                     <Volume2 size={16} />
                   </button>
                 </p>
@@ -89,7 +90,7 @@ function Head({ card, mark, reviewLabel }: { card: SessionCard; mark: string; re
       <h2>{card.display || card.lemma}</h2>
       <p className={styles.sound}>
         <span className="muted">{card.ipa}</span>
-        <button type="button" className={styles.speak} aria-label="Произнести" onClick={() => pronounce(card.lemma)}>
+        <button type="button" className={styles.speak} aria-label="Произнести" onClick={() => speak(card.lemma)}>
           <Volume2 size={18} />
         </button>
       </p>
@@ -97,14 +98,6 @@ function Head({ card, mark, reviewLabel }: { card: SessionCard; mark: string; re
       {card.note ? <p className={styles.note}>{card.note}</p> : null}
     </>
   )
-}
-
-function pronounce(lemma: string) {
-  if (!window.speechSynthesis) return
-  window.speechSynthesis.cancel()
-  const utter = new SpeechSynthesisUtterance(lemma)
-  utter.lang = 'en-US'
-  window.speechSynthesis.speak(utter)
 }
 
 function paint(text: string, words: string[]): ReactNode {

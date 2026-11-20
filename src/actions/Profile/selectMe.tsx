@@ -10,7 +10,7 @@ export default async function selectMe() {
 
   return database
     .selectFrom('profiles')
-    .select(['id', 'email', 'cefr', 'interests', 'dailyGoalMin', 'showMinutes', 'theme', 'streak'])
+    .select(['id', 'email', 'friendCode', 'cefr', 'interests', 'dailyGoalMin', 'showMinutes', 'theme', 'streak'])
     .where('id', '=', id)
     .executeTakeFirst()
 }

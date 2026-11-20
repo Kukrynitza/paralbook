@@ -66,28 +66,37 @@ export default async function selectText(textId: string, requestedPage?: number,
   if (!id) {
     throw new Error('Нужно войти')
   }
-  const text = await database
-    .selectFrom('texts')
-    .select(['id', 'ownerId', 'title', 'minutes', 'level', 'published', 'ready'])
-    .where('id', '=', textId)
-    .executeTakeFirst()
+  const [text, entry, pageCountRow, ruTotal] = await Promise.all([
+    database
+      .selectFrom('texts')
+      .select(['id', 'ownerId', 'title', 'minutes', 'level', 'published', 'ready'])
+      .where('id', '=', textId)
+      .executeTakeFirst(),
+    database
+      .selectFrom('collectionItems')
+      .select('progress')
+      .where('userId', '=', id)
+      .where('textId', '=', textId)
+      .executeTakeFirst(),
+    database
+      .selectFrom('pages')
+      .select((expression) => expression.fn.countAll<string>().as('total'))
+      .where('textId', '=', textId)
+      .executeTakeFirstOrThrow(),
+    database
+      .selectFrom('ruTokens')
+      .innerJoin('pages', 'pages.id', 'ruTokens.pageId')
+      .select((expression) => expression.fn.countAll<string>().as('total'))
+      .where('pages.textId', '=', textId)
+      .where(sql<boolean>`btrim(ru_tokens.text) <> ''`)
+      .executeTakeFirstOrThrow(),
+  ])
   if (!text || (!text.published && text.ownerId !== id)) {
     throw new Error('Текст не найден')
   }
   if (!text.ready) {
     throw new Error('Текст ещё обрабатывается')
   }
-  const entry = await database
-    .selectFrom('collectionItems')
-    .select('progress')
-    .where('userId', '=', id)
-    .where('textId', '=', textId)
-    .executeTakeFirst()
-  const pageCountRow = await database
-    .selectFrom('pages')
-    .select((expression) => expression.fn.countAll<string>().as('total'))
-    .where('textId', '=', textId)
-    .executeTakeFirstOrThrow()
   const pageCount = Number(pageCountRow.total)
   if (!pageCount) {
     throw new Error('Текст не найден')
@@ -109,70 +118,83 @@ export default async function selectText(textId: string, requestedPage?: number,
     .where('position', 'in', indices)
     .execute()
   const pageById = new Map(pageRows.map((row) => [row.position, row.id]))
-  const ruTotal = await database
-    .selectFrom('ruTokens')
-    .innerJoin('pages', 'pages.id', 'ruTokens.pageId')
-    .select((expression) => expression.fn.countAll<string>().as('total'))
-    .where('pages.textId', '=', textId)
-    .where(sql<boolean>`btrim(ru_tokens.text) <> ''`)
-    .executeTakeFirstOrThrow()
+  const pageIds = [...pageById.values()]
   const hasTranslation = Number(ruTotal.total) > 2
+  const [ruRows, enRows] = pageIds.length
+    ? await Promise.all([
+        database
+          .selectFrom('ruTokens')
+          .select(['pageId', 'text'])
+          .where('pageId', 'in', pageIds)
+          .orderBy('pageId', 'asc')
+          .orderBy('position', 'asc')
+          .execute(),
+        database
+          .selectFrom('enTokens')
+          .select(['pageId', 'text', 'align', 'ruAlign'])
+          .where('pageId', 'in', pageIds)
+          .orderBy('pageId', 'asc')
+          .orderBy('position', 'asc')
+          .execute(),
+      ])
+    : [[], []]
+  const ruByPage = new Map<string, { text: string }[]>()
+  for (const row of ruRows) {
+    const list = ruByPage.get(row.pageId)
+    if (list) list.push({ text: row.text })
+    else ruByPage.set(row.pageId, [{ text: row.text }])
+  }
+  const enByPage = new Map<string, { text: string; align: number | null; ruAlign: number | null }[]>()
+  for (const row of enRows) {
+    const list = enByPage.get(row.pageId)
+    if (list) list.push(row)
+    else enByPage.set(row.pageId, [row])
+  }
+  const forms = [...new Set(enRows.map((token) => bare(token.text)).filter(Boolean))]
+  const known: KnownWord[] = []
+  for (let index = 0; index < forms.length; index += 500) {
+    const rows = await database
+      .selectFrom('wordForms')
+      .innerJoin('lemmas', 'lemmas.lemma', 'wordForms.lemma')
+      .select(['wordForms.formNorm', 'wordForms.lemma', 'lemmas.rank', 'lemmas.translation'])
+      .where('wordForms.formNorm', 'in', forms.slice(index, index + 500))
+      .execute()
+    known.push(...rows)
+  }
+  const byForm = new Map<string, KnownWord[]>()
+  for (const row of known) {
+    const list = byForm.get(row.formNorm)
+    if (list) list.push(row)
+    else byForm.set(row.formNorm, [row])
+  }
+  function resolve(form: string) {
+    const rows = byForm.get(form)
+    if (!rows) return undefined
+    const exact = rows.find((row) => row.lemma === form)
+    return (
+      exact ??
+      rows.reduce<KnownWord | undefined>((best, row) => {
+        if (!best || row.rank < best.rank) return row
+        return best
+      }, undefined)
+    )
+  }
+
   const pages: ReadPayload['pages'] = []
   for (const pageIndexValue of indices) {
     const pageId = pageById.get(pageIndexValue)
     if (!pageId) continue
-    const [ruRows, enRows] = await Promise.all([
-      database
-        .selectFrom('ruTokens')
-        .select('text')
-        .where('pageId', '=', pageId)
-        .orderBy('position', 'asc')
-        .execute(),
-      database
-        .selectFrom('enTokens')
-        .select(['text', 'align', 'ruAlign'])
-        .where('pageId', '=', pageId)
-        .orderBy('position', 'asc')
-        .execute(),
-    ])
-    let ruTokens: RuToken[] = ruRows.map((token) => ({ text: token.text }))
-    const ruWords = ruRows.filter((token) => token.text.trim()).length
-    const enWords = enRows.filter((token) => token.text.trim()).length
+    const rus = ruByPage.get(pageId) ?? []
+    const eng = enByPage.get(pageId) ?? []
+    let ruTokens: RuToken[] = rus.map((token) => ({ text: token.text }))
+    const ruWords = rus.filter((token) => token.text.trim()).length
+    const enWords = eng.filter((token) => token.text.trim()).length
     if (hasTranslation && pageCount > 1 && (ruWords === 0 || ruWords > enWords * 2)) {
       const legacy = await legacyRussian(textId, pageIndexValue)
       if (legacy !== null) ruTokens = legacy
     }
-    const forms = [...new Set(enRows.map((token) => bare(token.text)).filter(Boolean))]
-    const known: KnownWord[] = []
-    for (let index = 0; index < forms.length; index += 500) {
-      const rows = await database
-        .selectFrom('wordForms')
-        .innerJoin('lemmas', 'lemmas.lemma', 'wordForms.lemma')
-        .select(['wordForms.formNorm', 'wordForms.lemma', 'lemmas.rank', 'lemmas.translation'])
-        .where('wordForms.formNorm', 'in', forms.slice(index, index + 500))
-        .execute()
-      known.push(...rows)
-    }
-    const byForm = new Map<string, KnownWord[]>()
-    for (const row of known) {
-      const list = byForm.get(row.formNorm)
-      if (list) list.push(row)
-      else byForm.set(row.formNorm, [row])
-    }
-    function resolve(form: string) {
-      const rows = byForm.get(form)
-      if (!rows) return undefined
-      const exact = rows.find((row) => row.lemma === form)
-      return (
-        exact ??
-        rows.reduce<KnownWord | undefined>((best, row) => {
-          if (!best || row.rank < best.rank) return row
-          return best
-        }, undefined)
-      )
-    }
     const tokens: ReadToken[] = []
-    for (const row of enRows) {
+    for (const row of eng) {
       for (const part of row.text.split(/(\s+)/)) {
         if (!part) continue
         if (!part.trim()) {

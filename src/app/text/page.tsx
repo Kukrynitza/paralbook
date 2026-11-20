@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import cancelImport from '@/actions/Reading/cancelImport'
 import startImport from '@/actions/Reading/startImport'
@@ -16,14 +16,6 @@ import styles from './page.module.css'
 
 const LIMIT = 200_000
 const ACCEPT = '.txt,.text,.md,.markdown,.fb2,.epub,.docx,.2books'
-
-const LANGUAGES = [
-  ['auto', 'Определить автоматически'],
-  ['en', 'Английский'],
-  ['ru', 'Русский'],
-] as const
-
-type Language = (typeof LANGUAGES)[number][0]
 
 interface StartedJob {
   id: string
@@ -53,7 +45,6 @@ function uploadFile(
   url: string,
   token: string,
   file: File,
-  language: Language,
   onProgress: (value: number) => void,
 ) {
   return new Promise<StartedJob>((resolve, reject) => {
@@ -61,7 +52,7 @@ function uploadFile(
     data.append('file', file)
     data.append('translate', 'true')
     data.append('source', 'upload')
-    data.append('language', language)
+    data.append('language', 'auto')
     const chunk = readChunkPrefs()
     data.append('chunkUnit', chunk.unit)
     data.append('chunkSize', String(chunk.size))
@@ -97,12 +88,12 @@ export default function Page() {
   const [topic, setTopic] = useState('')
   const [level, setLevel] = useState<Cefr>(user?.cefr ?? 'B1')
   const [file, setFile] = useState<File | null>(null)
-  const [language, setLanguage] = useState<Language>('auto')
   const [manual, setManual] = useState(false)
   const [english, setEnglish] = useState('')
   const [russian, setRussian] = useState('')
   const [pending, setPending] = useState(false)
   const [llm, setLlm] = useState<LlmSettingsView | null | undefined>(undefined)
+  const [llmRetrying, setLlmRetrying] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -123,6 +114,22 @@ export default function Page() {
     setLlm(value)
     return value
   }
+
+  const retryService = useCallback(async () => {
+    setLlmRetrying(true)
+    try {
+      setLlm(await readLlmSettings())
+    } finally {
+      setLlmRetrying(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (llm !== null) return
+    const retry = () => void retryService()
+    window.addEventListener('focus', retry)
+    return () => window.removeEventListener('focus', retry)
+  }, [llm, retryService])
 
   function blockAdd(state: LlmSettingsView | null) {
     if (state === null) {
@@ -164,7 +171,7 @@ export default function Page() {
       textId = start.textId
       jobId = start.jobId
       trackUpload({ id: start.jobId, textId: start.textId, title: bookTitle })
-      const job = await uploadFile(`${start.serviceUrl}/v1/jobs/import/file`, start.token, file, language, (progress) => {
+      const job = await uploadFile(`${start.serviceUrl}/v1/jobs/import/file`, start.token, file, (progress) => {
         updateUpload(start.textId, progress, 'uploading')
       })
       trackJob({ id: job.id, textId: start.textId, title: bookTitle, type: 'import' })
@@ -254,15 +261,21 @@ export default function Page() {
       <div className="pad stack">
         {noKey || serviceDown ? (
           <div style={hasAlerts ? { visibility: 'hidden' } : undefined}>
-            <LlmNotice kind={noKey ? 'key' : 'service'} />
+            <LlmNotice
+              kind={noKey ? 'key' : 'service'}
+              onRetry={noKey ? undefined : retryService}
+              retrying={llmRetrying}
+            />
           </div>
         ) : null}
         <form className="stack" onSubmit={(event) => void submitFile(event)}>
           <div className="card stack">
-            <label className="field">
+            <div className="field">
               <span>Файл книги</span>
               <input
+                id="book-file"
                 type="file"
+                className={styles.fileInput}
                 accept={ACCEPT}
                 disabled={pending}
                 onChange={(event) => {
@@ -271,23 +284,24 @@ export default function Page() {
                   if (next) setManual(false)
                 }}
               />
+              <label
+                htmlFor="book-file"
+                className="btn ghost slim"
+                style={{ width: 'auto', alignSelf: 'flex-start', pointerEvents: pending ? 'none' : undefined }}
+              >
+                {file ? 'Выбрать другой файл' : 'Выбрать файл'}
+              </label>
               <span className="muted">
                 {file ? file.name : 'TXT, FB2, EPUB, DOCX, Markdown, .2books — до 30 МБ · автоперевод до 200 000 символов'}
               </span>
-            </label>
-            <label className="field">
+            </div>
+            <div className="field">
               <span>Язык книги</span>
-              <select className="input" value={language} onChange={(event) => setLanguage(event.target.value as Language)}>
-                {LANGUAGES.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
               <span className="muted">
-                {language === 'ru' ? 'Русская книга будет переведена на английский' : 'Если книга на русском, она будет переведена на английский автоматически'}
+                Определяется автоматически. Поддерживаются английский и русский; другие языки будут отклонены.
+                Русский текст переводится на английский.
               </span>
-            </label>
+            </div>
           </div>
           <label className="field">
             <span>Название</span>

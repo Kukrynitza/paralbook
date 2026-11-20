@@ -3,6 +3,7 @@
 import { sql, type RawBuilder, type SqlBool } from 'kysely'
 import database from '@/modules/database'
 import { touchStreak } from '@/sorse/query'
+import { shuffle } from '@/sorse/shuffle'
 import { LEVELS } from '@/sorse/types'
 import userId from '@/sorse/userId'
 
@@ -14,10 +15,13 @@ const BANDS: Record<string, [number, number]> = {
 
 export interface StudyDeck {
   lemmas: string[]
+  fresh: string[]
+  due: string[]
   mode: string
   nextMinutes: number | null
   nextDueAt: string | null
   newToday: number
+  hasMoreFresh: boolean
   streak: number
   today: { new: number; reviewed: number; known: number; mastered: number }
 }
@@ -77,7 +81,11 @@ async function freshLemmas(ownerId: string, chosen: string[], limit: number) {
   const idle = packScope(chosen, 'uw')
   if (idle.length) {
     parts.push(sql`
-      select uw.lemma, l.rank
+      select uw.lemma, l.rank,
+        case
+          when nullif(btrim(coalesce(uw.context_en, '')), '') is not null then 0
+          else 1
+        end as priority
       from user_words uw
       join lemmas l on l.lemma = uw.lemma
       where uw.user_id = ${ownerId}
@@ -88,7 +96,7 @@ async function freshLemmas(ownerId: string, chosen: string[], limit: number) {
   const outside = packScope(chosen, 'l')
   if (outside.length) {
     parts.push(sql`
-      select l.lemma, l.rank
+      select l.lemma, l.rank, 2 as priority
       from lemmas l
       where (${sql.join(outside, sql` or `)})
         and not exists (
@@ -100,7 +108,7 @@ async function freshLemmas(ownerId: string, chosen: string[], limit: number) {
   const rows = await sql<{ lemma: string }>`
     select pool.lemma
     from (${sql.join(parts, sql` union `)}) pool
-    order by pool.rank asc nulls last, pool.lemma
+    order by pool.priority asc, pool.rank asc nulls last, pool.lemma
     limit ${limit}
   `.execute(database)
   return rows.rows.map((row) => row.lemma).filter(Boolean)
@@ -109,7 +117,7 @@ async function freshLemmas(ownerId: string, chosen: string[], limit: number) {
 export default async function studyDeck(packs: string[], mode: string, daily: number, extra = false): Promise<StudyDeck> {
   const id = await userId()
   if (!id) throw new Error('Нужно войти')
-  const limit = Math.min(60, Math.max(5, Math.round(daily || 10)))
+  const limit = Math.min(60, Math.max(0, Math.round(daily || 0)))
   const kind = mode === 'learn' || mode === 'review' || mode === 'mixed' ? mode : ''
   const chosen = chosenPacks(packs)
   const streak = await touchStreak(database, id)
@@ -131,10 +139,9 @@ export default async function studyDeck(packs: string[], mode: string, daily: nu
     from (
       select due_at - case interval_days
         when 1 then interval '30 minutes'
-        when 2 then interval '12 hours'
+        when 2 then interval '2 hours'
         when 3 then interval '1 day'
         when 4 then interval '7 days'
-        when 5 then interval '30 days'
         else interval '60 days'
       end as reviewed_at
       from user_words
@@ -175,32 +182,38 @@ export default async function studyDeck(packs: string[], mode: string, daily: nu
   const dueLemmas = due.rows.map((row) => row.lemma).filter(Boolean)
   const reviewWaiting = kind === 'review' && dueLemmas.length === 0 && nextMinutes !== null
   let fresh: string[] = []
-  if (extra || ((kind === 'learn' || kind === 'mixed') && chosen.length > 0)) {
-    if (!chosen.length) throw new Error('Выберите хотя бы одну пачку')
-    fresh = await freshLemmas(id, chosen, limit)
-    if ((extra || kind === 'learn') && fresh.length === 0) throw new Error('В выбранных пачках нет новых слов')
+  let hasMoreFresh = false
+  if (limit > 0 && (extra || kind === 'learn' || kind === 'mixed')) {
+    const batch = await freshLemmas(id, chosen, limit + 1)
+    fresh = shuffle(batch.slice(0, limit))
+    hasMoreFresh = batch.length > limit
   }
+  const orderedDue = shuffle(dueLemmas)
   let lemmas: string[] = []
   if (extra) lemmas = fresh
   else if (reviewWaiting) lemmas = []
-  else if (kind === 'review') lemmas = dueLemmas
+  else if (kind === 'review') lemmas = orderedDue
   else if (kind === 'learn') lemmas = fresh
   else if (kind === 'mixed') {
     const seen = new Set<string>()
-    lemmas = [...dueLemmas, ...fresh].filter((lemma) => {
+    lemmas = [...orderedDue, ...fresh].filter((lemma) => {
       if (seen.has(lemma)) return false
       seen.add(lemma)
       return true
     })
   }
+  lemmas = shuffle(lemmas)
   const learned = Number(known.rows[0]?.n ?? 0)
   const added = Math.max(0, Number(activity.rows[0]?.words ?? 0) - learned)
   return {
     lemmas,
+    fresh,
+    due: orderedDue,
     mode: extra ? 'learn' : kind,
     nextMinutes,
     nextDueAt,
     newToday: added,
+    hasMoreFresh,
     streak,
     today: {
       new: added,

@@ -10,6 +10,7 @@ import updateVocabulary from '@/actions/Vocabulary/updateVocabulary'
 import selectWord from '@/actions/Words/selectWord'
 import WordArticle from '@/components/WordArticle/WordArticle'
 import { HINT_MAX } from '@/sorse/hint'
+import { nextReviewText } from '@/sorse/intervals'
 import { type DictEntry, type VocabItem } from '@/sorse/types'
 import { useUi } from '@/contexts/AuthContext'
 import styles from '../words.module.css'
@@ -126,6 +127,9 @@ export default function Page() {
         <div className={item.tone === 'ok' ? `${styles.stats} ${styles.statsOk}` : `${styles.stats} ${styles.statsError}`}>
           Верно: {item.correct} · Ошибки: {item.wrong}
         </div>
+        <p className="small muted" style={{ textAlign: 'center', margin: 0 }}>
+          {item.mastered ? 'Освоено — в повторение не попадает' : nextReviewText(item.dueAt)}
+        </p>
         {phase === 'error' ? <p className="form-error">{message}</p> : null}
         <button className="btn" disabled={phase === 'loading'} onClick={save}>
           {phase === 'loading' ? 'Сохраняем…' : 'Сохранить'}

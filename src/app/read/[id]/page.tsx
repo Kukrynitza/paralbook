@@ -3,14 +3,19 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { ArrowLeft, Star, Volume2, X } from 'lucide-react'
+import { ArrowLeft, Check, Star, Volume2, X } from 'lucide-react'
 import saveProgress from '@/actions/Reading/saveProgress'
 import selectText from '@/actions/Reading/selectText'
 import selectWord from '@/actions/Words/selectWord'
 import addVocabulary from '@/actions/Vocabulary/addVocabulary'
+import { addExtra, dailyUsed, markAdded, readDayState } from '@/sorse/daily'
+import { readDailyNew } from '@/sorse/prefs'
 import { type DictEntry, type ReadPage, type ReadPayload } from '@/sorse/types'
 import { sentenceAt } from '@/sorse/context'
-import { useUi } from '@/contexts/AuthContext'
+import { clearResume, saveResume } from '@/sorse/resume'
+import { speak } from '@/sorse/speech'
+import { useAuth, useUi } from '@/contexts/AuthContext'
+import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import WordArticle from '@/components/WordArticle/WordArticle'
 import Pager from '@/components/Pager/Pager'
 import styles from './page.module.css'
@@ -23,7 +28,9 @@ export default function Page() {
   const params = useParams()
   const id = String(params?.id ?? '')
   const router = useRouter()
+  const { user } = useAuth()
   const { notify } = useUi()
+  const owner = user?.id
   const [data, setData] = useState<ReadPayload | null>(null)
   const [cache, setCache] = useState<Record<number, ReadPage>>({})
   const [error, setError] = useState('')
@@ -41,6 +48,9 @@ export default function Page() {
   const [entry, setEntry] = useState<DictEntry | null>(null)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [limitOpen, setLimitOpen] = useState(false)
+  const [removeOpen, setRemoveOpen] = useState(false)
+  const [extraCount, setExtraCount] = useState(5)
   const [loading, setLoading] = useState(false)
   const lineRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -90,6 +100,23 @@ export default function Page() {
       active = false
     }
   }, [id])
+
+  useEffect(() => {
+    if (!data) return
+    const progress = Math.min(1, Math.max(0, (page + along) / Math.max(1, data.pageCount)))
+    if (finished || data.progress >= 1) {
+      clearResume(owner)
+      return
+    }
+    saveResume({
+      id,
+      title: data.title,
+      page,
+      pageCount: data.pageCount,
+      progress,
+      updatedAt: Date.now(),
+    }, owner)
+  }, [data, id, page, along, finished, owner])
 
   async function go(next: number) {
     if (!data) return
@@ -173,31 +200,54 @@ export default function Page() {
   }, [hit, page])
 
   async function onToken(index: number, lemma: string, translation?: string, align?: number, ruAlign?: number) {
-    if (!data?.hasTranslation) {
-      const word = await selectWord(lemma)
-      setEntry(word)
-      setSaved(Boolean(word.saved))
-      setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
-      return
+    try {
+      if (!data?.hasTranslation) {
+        const word = await selectWord(lemma)
+        setEntry(word)
+        setSaved(Boolean(word.saved))
+        setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
+        return
+      }
+      if (pick?.index === index && pick.phase === 'gloss') {
+        const word = await selectWord(lemma)
+        setEntry(word)
+        setSaved(Boolean(word.saved))
+        setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
+        return
+      }
+      setPick({ index, lemma, translation, align, ruAlign, phase: 'gloss' })
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось открыть слово')
     }
-    if (pick?.index === index && pick.phase === 'gloss') {
-      const word = await selectWord(lemma)
-      setEntry(word)
-      setSaved(Boolean(word.saved))
-      setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
-      return
-    }
-    setPick({ index, lemma, translation, align, ruAlign, phase: 'gloss' })
   }
 
   async function addWord() {
+    if (!entry || saving) return
+    if (saved) {
+      setPick(null)
+      setRemoveOpen(true)
+      return
+    }
+    const day = readDayState(owner)
+    const limit = readDailyNew(owner) + day.extra
+    if (dailyUsed(day) >= limit) {
+      setExtraCount(5)
+      setPick(null)
+      setLimitOpen(true)
+      return
+    }
+    await saveWord()
+  }
+
+  async function saveWord() {
     if (!entry || saving) return
     setSaving(true)
     try {
       const context = pick ? sentenceAt(current?.tokens ?? [], pick.index) : ''
       const result = await addVocabulary(entry.lemma, context)
+      if (result.saved) markAdded(entry.lemma, owner)
       setSaved(result.saved)
-      notify(result.saved ? 'Сохранено в словарь' : 'Убрано из словаря')
+      notify(result.saved ? 'Добавлено в «Свои слова»' : 'Убрано из словаря')
     } catch (reason) {
       notify(reason instanceof Error ? reason.message : 'Не удалось сохранить')
     } finally {
@@ -205,10 +255,15 @@ export default function Page() {
     }
   }
 
-  function speak() {
-    if (!entry || !window.speechSynthesis) return
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance(entry.lemma))
+  async function removeWord() {
+    setRemoveOpen(false)
+    await saveWord()
+  }
+
+  function confirmLimit() {
+    addExtra(extraCount, owner)
+    setLimitOpen(false)
+    void saveWord()
   }
 
   if (error) return <p className="form-error pad">{error}</p>
@@ -224,7 +279,7 @@ export default function Page() {
           <ArrowLeft size={22} />
         </button>
         <div className="grow">{data.title}</div>
-        <span>{loading ? '…' : percent}</span>
+        <span data-tip="Прогресс чтения">{loading ? '…' : percent}</span>
       </header>
       {finished ? <div className="bar"><i style={{ width: '100%' }} /></div> : null}
       {pick && data.hasTranslation ? (
@@ -277,7 +332,9 @@ export default function Page() {
         {finished ? (
           <div className="pad" style={{ textAlign: 'center' }}>
             <div className="card">
-              <div className={styles.done}>✓</div>
+              <div className={styles.done}>
+                <Check size={36} strokeWidth={3} />
+              </div>
               <h2>Текст прочитан</h2>
               <p className="big" style={{ fontSize: 32 }}>
                 100%
@@ -318,7 +375,7 @@ export default function Page() {
               }
               trailing={
                 <div className="gap8">
-                  <button className="icon-btn" onClick={speak} aria-label="Произнести">
+                  <button className="icon-btn" onClick={() => speak(entry.lemma)} aria-label="Произнести">
                     <Volume2 size={20} />
                   </button>
                   <button className="icon-btn" onClick={() => setPick({ ...pick, phase: 'gloss' })} aria-label="Закрыть">
@@ -330,6 +387,51 @@ export default function Page() {
           </div>
         </div>
       ) : null}
+      <ConfirmDialog
+        open={limitOpen}
+        title="Лимит новых слов"
+        confirmLabel="Добавить"
+        onClose={() => setLimitOpen(false)}
+        onConfirm={confirmLimit}
+      >
+        <p>На сегодня лимит новых слов уже израсходован. Добавить это слово сверх лимита?</p>
+        <div className="gap8">
+          {[5, 10, 15].map((value) => (
+            <button
+              key={value}
+              type="button"
+              className={extraCount === value ? 'chip on' : 'chip'}
+              onClick={() => setExtraCount(value)}
+            >
+              +{value}
+            </button>
+          ))}
+        </div>
+        <label className="field" style={{ marginTop: 12 }}>
+          <span>Своё количество</span>
+          <input
+            className="input compact"
+            type="number"
+            min={1}
+            max={60}
+            value={extraCount}
+            onChange={(event) => setExtraCount(Math.max(1, Math.min(60, Number(event.target.value) || 1)))}
+          />
+        </label>
+        <p className="small muted">Слово попадёт в «Свои слова» и в изучение.</p>
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={removeOpen}
+        title="Убрать слово из словаря?"
+        confirmLabel="Убрать"
+        busyLabel="Убираю…"
+        busy={saving}
+        onClose={() => setRemoveOpen(false)}
+        onConfirm={() => void removeWord()}
+      >
+        <p>Слово и весь прогресс повторений будут удалены.</p>
+        <p className="small muted">Если вы просто хотели посмотреть перевод, закройте это окно.</p>
+      </ConfirmDialog>
     </div>
   )
 }

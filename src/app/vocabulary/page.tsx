@@ -52,6 +52,7 @@ export default function Page() {
   const { notify } = useUi()
   const [list, setList] = useState<(PageResult<VocabItem> & { hasWords: boolean }) | null>(null)
   const [hasWords, setHasWords] = useState<boolean | null>(null)
+  const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [studyOpen, setStudyOpen] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
@@ -62,22 +63,27 @@ export default function Page() {
 
   useEffect(() => {
     let active = true
-    selectVocabulary(query, status, packs, page).then((data) => {
-      if (!active) return
-      setList(data)
-      setHasWords(data.hasWords)
-    })
+    setError('')
+    selectVocabulary(query, status, packs, page)
+      .then((data) => {
+        if (!active) return
+        setList(data)
+        setHasWords(data.hasWords)
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : 'Не удалось загрузить словарь')
+      })
     return () => {
       active = false
     }
   }, [page, query, status, packs])
 
   useEffect(() => {
-    setDaily(readDailyNew())
-  }, [])
+    setDaily(readDailyNew(user?.id))
+  }, [user?.id])
 
   function dismissSeed() {
-    if (user) markSeedAsked(user.cefr)
+    if (user) markSeedAsked(user.cefr, user.id)
     setConfirmSeed(false)
   }
 
@@ -89,21 +95,21 @@ export default function Page() {
   }
 
   function studyQuery() {
-    const chosen = packs.length ? packs : user ? [user.cefr] : []
+    const chosen = packs.length ? packs : user ? ['own', user.cefr] : []
     const next = new URLSearchParams({ mode: 'mixed', daily: String(daily) })
     if (chosen.length) next.set('packs', chosen.join(','))
     return `/study?${next.toString()}`
   }
 
   function openStudy() {
-    writeDailyNew(daily)
+    writeDailyNew(daily, user?.id)
     router.push(studyQuery())
   }
 
   async function seed() {
     try {
       const result = await seedVocabulary()
-      if (user) markSeedAsked(user.cefr)
+      if (user) markSeedAsked(user.cefr, user.id)
       setConfirmSeed(false)
       setQuery('')
       setStatus('sum')
@@ -118,7 +124,9 @@ export default function Page() {
     }
   }
 
-  if (!list || hasWords === null) return <p className="loading">Загрузка…</p>
+  if (!list || hasWords === null) {
+    return <p className={error ? 'form-error pad' : 'loading'}>{error || 'Загрузка…'}</p>
+  }
   const pageItems = list.items
   const dictionaryEmpty = hasWords === false
   return (
@@ -134,6 +142,7 @@ export default function Page() {
           </button>
         </div>
       </header>
+      {error ? <p className="form-error pad">{error}</p> : null}
       <label className="search">
         <Search size={18} />
           <input
@@ -175,7 +184,7 @@ export default function Page() {
               onChange={(event) => {
                 const value = Number(event.target.value)
                 setDaily(value)
-                writeDailyNew(value)
+                writeDailyNew(value, user?.id)
               }}
             />
           </div>

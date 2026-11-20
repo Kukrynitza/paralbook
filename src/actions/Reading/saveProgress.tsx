@@ -10,16 +10,20 @@ export default async function saveProgress(textId: string, page: number): Promis
     throw new Error('Нужно войти')
   }
   return database.transaction().execute(async (trx) => {
-    const text = await trx.selectFrom('texts').select(['id', 'minutes']).where('id', '=', textId).executeTakeFirst()
-    const entry = await trx
+    const text = await trx
+      .selectFrom('texts')
+      .select(['id', 'minutes'])
+      .where('id', '=', textId)
+      .executeTakeFirst()
+    if (!text) {
+      throw new Error('Текст не найден')
+    }
+    let entry = await trx
       .selectFrom('collectionItems')
       .select(['id', 'credited'])
       .where('userId', '=', id)
       .where('textId', '=', textId)
       .executeTakeFirst()
-    if (!text || !entry) {
-      throw new Error('Сначала добавьте текст в подборку')
-    }
     const pageCount = await trx
       .selectFrom('pages')
       .select((expression) => expression.fn.countAll<string>().as('total'))
@@ -31,6 +35,11 @@ export default async function saveProgress(textId: string, page: number): Promis
     }
     const last = total - 1
     const next = Math.max(0, Math.min(last, page))
+    if (!entry) {
+      // Текст читается из библиотеки, но не добавлен в подборку.
+      // Прогресс не сохраняем, пока пользователь явно не сохранит текст.
+      return { page: next, progress: 0, finished: false }
+    }
     let progress = next / total
     let finished = false
     if (page >= total) {

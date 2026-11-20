@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { BookOpen, Clock, FilePlus, Globe, Sparkles, Trash2 } from 'lucide-react'
 import { maxValue, minLength, minValue, number, picklist, pipe, safeParse, string, trim } from 'valibot'
@@ -8,12 +8,11 @@ import deleteChatMessage from '@/actions/Chat/deleteChatMessage'
 import generateText from '@/actions/Chat/generateText'
 import selectChat from '@/actions/Chat/selectChat'
 import syncChatJobs from '@/actions/Chat/syncChatJobs'
-import selectCollection from '@/actions/Collection/selectCollection'
-import publishCollection from '@/actions/Collection/publishCollection'
+import publishText from '@/actions/Collection/publishText'
 import deleteText from '@/actions/Reading/deleteText'
 import { LEVELS, type Cefr, type ChatMessage, type LlmSettingsView } from '@/sorse/types'
 import { useAuth, useUi } from '@/contexts/AuthContext'
-import { statusLabel, useJobs } from '@/contexts/JobContext'
+import { useJobs } from '@/contexts/JobContext'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import PublishedBadge from '@/components/PublishedBadge/PublishedBadge'
 import LlmNotice from '@/components/LlmNotice/LlmNotice'
@@ -54,6 +53,7 @@ export default function Page() {
   const { confirm, notify, notifyError } = useUi()
   const { trackJob, jobs, revision, busyJob } = useJobs()
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -61,7 +61,9 @@ export default function Page() {
   const [activeJob, setActiveJob] = useState<string | null>(null)
   const [publishingId, setPublishingId] = useState<string | null>(null)
   const [publishBusy, setPublishBusy] = useState(false)
+  const [publishConfirm, setPublishConfirm] = useState(false)
   const [llm, setLlm] = useState<LlmSettingsView | null | undefined>(undefined)
+  const [llmRetrying, setLlmRetrying] = useState(false)
   const seenJob = useRef(false)
 
   useEffect(() => {
@@ -84,9 +86,26 @@ export default function Page() {
     return value
   }
 
+  const retryService = useCallback(async () => {
+    setLlmRetrying(true)
+    try {
+      setLlm(await readLlmSettings())
+    } finally {
+      setLlmRetrying(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (llm !== null) return
+    const retry = () => void retryService()
+    window.addEventListener('focus', retry)
+    return () => window.removeEventListener('focus', retry)
+  }, [llm, retryService])
+
   async function load() {
     const data = await selectChat()
     setMessages(data.messages)
+    setLoaded(true)
   }
 
   useEffect(() => {
@@ -94,8 +113,14 @@ export default function Page() {
     syncChatJobs()
       .catch(() => undefined)
       .then(() => selectChat())
-      .then((data) => active && setMessages(data.messages))
+      .then((data) => {
+        if (!active) return
+        setMessages(data.messages)
+      })
       .catch(() => undefined)
+      .finally(() => {
+        if (active) setLoaded(true)
+      })
     return () => {
       active = false
     }
@@ -205,9 +230,14 @@ export default function Page() {
     if (!ok) return
     try {
       await deleteChatMessage(messageId)
-      await load()
     } catch (reason) {
       notifyError(reason instanceof Error ? reason.message : 'Не удалось удалить')
+      return
+    }
+    try {
+      await load()
+    } catch {
+      notifyError('Запрос удалён, но чат не обновился. Обновите страницу.')
     }
   }
 
@@ -216,25 +246,34 @@ export default function Page() {
     if (!ok) return
     try {
       await deleteText(textId)
-      await load()
     } catch (reason) {
       notifyError(reason instanceof Error ? reason.message : 'Не удалось удалить')
+      return
+    }
+    try {
+      await load()
+    } catch {
+      notifyError('Текст удалён, но чат не обновился. Обновите страницу.')
     }
   }
 
   async function publish() {
-    if (!publishingId) return
+    if (!publishingId || !publishConfirm) return
     setPublishBusy(true)
     try {
-      const list = await selectCollection('new', 1)
-      const entry = list.items.find((item) => item.textId === publishingId)
-      if (!entry) throw new Error('В подборке нет такого текста')
-      await publishCollection(entry.id)
-      setPublishingId(null)
-      await load()
-      notify('Текст опубликован')
+      await publishText(publishingId)
     } catch (reason) {
       notifyError(reason instanceof Error ? reason.message : 'Не удалось опубликовать')
+      setPublishBusy(false)
+      return
+    }
+    setPublishingId(null)
+    setPublishConfirm(false)
+    notify('Текст опубликован')
+    try {
+      await load()
+    } catch {
+      notifyError('Текст опубликован, но чат не обновился. Обновите страницу.')
     } finally {
       setPublishBusy(false)
     }
@@ -247,7 +286,8 @@ export default function Page() {
       </header>
       <p className={styles.lead}>Опишите тему — соберу текст с переводом</p>
       <div className={styles.thread} style={{ flex: 1 }}>
-        {!messages.length && !pending && !busyJob ? (
+        {!loaded ? <p className="loading">Загрузка…</p> : null}
+        {loaded && !messages.length && !pending && !busyJob ? (
           <div className={styles.empty}>
             <span className={styles.emptyIcon}>
               <Sparkles size={20} />
@@ -335,7 +375,7 @@ export default function Page() {
                 </Link>
                 {card.published ? null : (
                   <>
-                    <button className="btn soft slim" onClick={() => setPublishingId(card.id)}>
+                    <button className="btn soft slim" onClick={() => { setPublishConfirm(false); setPublishingId(card.id) }}>
                       <Globe size={14} />
                       Опубликовать в библиотеку
                     </button>
@@ -373,53 +413,51 @@ export default function Page() {
         </div>
       ) : serviceDown ? (
         <div className={styles.notice}>
-          <LlmNotice kind="service" />
+          <LlmNotice kind="service" onRetry={retryService} retrying={llmRetrying} />
         </div>
       ) : null}
-      {busyJob ? (
-        <div className={styles.busy}>
-          <strong>Сейчас выполняется: {busyJob.title}</strong>
-          <div className="bar"><i style={{ width: `${Math.max(2, busyJob.progress)}%` }} /></div>          <div className="row small muted">
-            <span>{statusLabel(busyJob.stage)}</span>
-            <span>{busyJob.progress}%</span>
-          </div>
-          <p className="small muted" style={{ margin: 0 }}>
-            Новый запрос можно отправить после завершения. Можно уйти — прогресс останется внизу, там же можно отменить.
-          </p>
-        </div>
-      ) : (
-        <form
-          className={styles.composer}
-          onSubmit={(event) => {
-            event.preventDefault()
-            void send(draft)
-          }}
-        >
-          <Link className={styles.own} href="/text">
-            <FilePlus size={15} />
-            Добавить текст
-          </Link>
-          <input className="input" value={draft} placeholder="Тема и время чтения" onChange={(event) => setDraft(event.target.value)} />
-          <button className={styles.send} aria-label="Отправить" title="Отправить" disabled={pending}>
-            →
-          </button>
-        </form>
-      )}
+      <form
+        className={styles.composer}
+        onSubmit={(event) => {
+          event.preventDefault()
+          void send(draft)
+        }}
+      >
+        <Link className={styles.own} href="/text">
+          <FilePlus size={15} />
+          Добавить текст
+        </Link>
+        <input className="input" value={draft} placeholder="Тема и время чтения" onChange={(event) => setDraft(event.target.value)} />
+        <button className={styles.send} aria-label="Отправить" title="Отправить" disabled={pending || Boolean(busyJob)}>
+          →
+        </button>
+      </form>
       <ConfirmDialog
         open={Boolean(publishingId)}
         title="Опубликовать текст?"
         confirmLabel="Опубликовать"
         busyLabel="Публикую…"
         busy={publishBusy}
-        onClose={() => setPublishingId(null)}
+        confirmDisabled={!publishConfirm}
+        onClose={() => { setPublishingId(null); setPublishConfirm(false) }}
         onConfirm={() => void publish()}
       >
         <p>Текст появится в общей библиотеке и станет виден другим пользователям.</p>
-        <ul>
-          <li>его смогут читать, оценивать и добавлять в свою подборку;</li>
-          <li>он попадёт в поиск и рейтинг библиотеки;</li>
-          <li>убрать текст из библиотеки после публикации нельзя.</li>
-        </ul>
+        <p className="small muted">
+          Текст смогут читать, оценивать и добавлять в свою подборку. Он попадёт в поиск и рейтинг библиотеки;
+          убрать его из библиотеки после публикации нельзя.
+        </p>
+        <label className="row small" style={{ justifyContent: 'flex-start', alignItems: 'flex-start' }}>
+          <input
+            type="checkbox"
+            checked={publishConfirm}
+            onChange={(event) => setPublishConfirm(event.target.checked)}
+            style={{ marginTop: 2 }}
+          />
+          <span>
+            Подтверждаю, что текст не содержит непристойного, оскорбительного или запрещённого контента.
+          </span>
+        </label>
       </ConfirmDialog>
     </div>
   )

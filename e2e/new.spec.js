@@ -2,6 +2,19 @@ const { test, expect } = require('@playwright/test')
 
 test.use({ viewport: { width: 420, height: 900 } })
 
+async function openCard(page, lemma) {
+  for (let index = 0; index < 60; index += 1) {
+    const heading = page.locator('h2').first()
+    await expect(heading).toBeVisible({ timeout: 30000 })
+    if ((await heading.innerText()).trim() === lemma) return
+    const know = page.getByRole('button', { name: 'Знаю', exact: true })
+    if (!(await know.count())) break
+    await know.click()
+    await page.waitForTimeout(700)
+  }
+  await expect(page.getByRole('heading', { name: lemma }).first()).toBeVisible({ timeout: 30000 })
+}
+
 test('pager shows five pages and accepts a typed page', async ({ page }) => {
   await page.goto('http://localhost:5173/read/0f36f4fd-775d-4966-a05f-866b1cf1208c')
   const pager = page.locator('div[class*="Pager_pager"]')
@@ -24,17 +37,27 @@ test('star saves a word together with its sentence and removes it again', async 
   const startedSaved = (await star.getAttribute('aria-label')) === 'Убрать из словаря'
   if (startedSaved) {
     await star.click()
+    const dialog = page.getByRole('dialog', { name: 'Убрать слово из словаря?' })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: 'Убрать' }).click()
     await expect(page.getByText('Убрано из словаря')).toBeVisible()
+    await token.click()
+    await token.click()
     await page.getByRole('button', { name: 'В словарь' }).click()
-    await expect(page.getByText('Сохранено в словарь')).toBeVisible()
+    await expect(page.getByText('Добавлено в «Свои слова»')).toBeVisible()
   } else {
     await star.click()
-    await expect(page.getByText('Сохранено в словарь')).toBeVisible()
+    await expect(page.getByText('Добавлено в «Свои слова»')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Убрать из словаря' })).toBeVisible()
     await page.getByRole('button', { name: 'Убрать из словаря' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Убрать слово из словаря?' })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: 'Убрать' }).click()
     await expect(page.getByText('Убрано из словаря')).toBeVisible()
+    await token.click()
+    await token.click()
     await page.getByRole('button', { name: 'В словарь' }).click()
-    await expect(page.getByText('Сохранено в словарь')).toBeVisible()
+    await expect(page.getByText('Добавлено в «Свои слова»')).toBeVisible()
   }
 })
 
@@ -126,7 +149,7 @@ test('settings show system info', async ({ page }) => {
 
 test('training card shows the saved text example', async ({ page }) => {
   await page.goto('http://localhost:5173/study?mode=learn&packs=own&daily=60')
-  await expect(page.getByRole('heading', { name: 'that' }).first()).toBeVisible({ timeout: 60000 })
+  await openCard(page, 'that')
   await page.getByRole('button', { name: 'Показать подсказку' }).click()
   await expect(page.getByText('Из вашего текста')).toBeVisible()
   await expect(page.getByText('PW context check for the first card.')).toBeVisible()
@@ -135,7 +158,7 @@ test('training card shows the saved text example', async ({ page }) => {
 test('training card keeps one height and scrolls inside', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 600 })
   await page.goto('http://localhost:5173/study?mode=learn&packs=own&daily=60')
-  await expect(page.getByRole('heading', { name: 'that' }).first()).toBeVisible({ timeout: 60000 })
+  await openCard(page, 'that')
   await page.getByRole('button', { name: 'Показать подсказку' }).click()
   await page.waitForTimeout(600)
   const info = await page.evaluate(() => {

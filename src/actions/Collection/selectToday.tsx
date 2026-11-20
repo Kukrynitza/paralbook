@@ -10,16 +10,18 @@ export default async function selectToday(): Promise<Today> {
   if (!id) {
     throw new Error('Нужно войти')
   }
-  const profile = await database
-    .selectFrom('profiles')
-    .select('dailyGoalMin')
-    .where('id', '=', id)
-    .executeTakeFirst()
+  const [profile, today, friends] = await Promise.all([
+    database
+      .selectFrom('profiles')
+      .select('dailyGoalMin')
+      .where('id', '=', id)
+      .executeTakeFirst(),
+    todayActivity(database, id),
+    friendsOf(database, id),
+  ])
   if (!profile) {
     throw new Error('Нужно войти')
   }
-  const today = await todayActivity(database, id)
-  const friends = await friendsOf(database, id)
   return {
     readingMin: today.minutes,
     words: today.words,

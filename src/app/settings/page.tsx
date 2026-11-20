@@ -212,13 +212,13 @@ export default function Page() {
   async function loadOfferedWords() {
     if (!offerLevel) return
     const result = await seedVocabulary()
-    markSeedAsked(offerLevel)
+    markSeedAsked(offerLevel, user?.id)
     setOfferLevel(null)
     notify(result.added.length ? 'Слова загружены' : 'Эти слова уже в словаре')
   }
 
   function skipOfferedWords() {
-    if (offerLevel) markSeedAsked(offerLevel)
+    if (offerLevel) markSeedAsked(offerLevel, user?.id)
     setOfferLevel(null)
   }
 

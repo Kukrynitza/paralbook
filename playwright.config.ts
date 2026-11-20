@@ -1,6 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const python = process.platform === 'win32' ? '.venv\\Scripts\\python.exe run.py' : '.venv/bin/python run.py'
+const textPort = process.env.TEXT_SERVICE_PORT || '8000'
+const python = process.platform === 'win32'
+  ? '.venv\\Scripts\\python.exe run.py'
+  : '.venv/bin/python run.py'
 
 export default defineConfig({
   testDir: './e2e',
@@ -34,7 +37,8 @@ export default defineConfig({
     {
       command: python,
       cwd: './text-service',
-      url: 'http://127.0.0.1:8000/health',
+      url: `http://127.0.0.1:${textPort}/health`,
+      env: { TEXT_SERVICE_PORT: textPort },
       reuseExistingServer: true,
       timeout: 180_000,
     },

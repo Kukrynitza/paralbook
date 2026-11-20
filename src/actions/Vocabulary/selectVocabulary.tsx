@@ -35,6 +35,8 @@ export default async function selectVocabulary(
       'userWords.correct',
       'userWords.wrong',
       'userWords.mastered',
+      'userWords.intervalDays',
+      'userWords.dueAt',
       'userWords.contextEn',
       'lemmas.ipa',
       'lemmas.translation',
@@ -100,6 +102,8 @@ export default async function selectVocabulary(
       correct: row.correct,
       wrong: row.wrong,
       mastered: row.mastered,
+      intervalDays: Number(row.intervalDays ?? 0),
+      dueAt: row.dueAt ? new Date(row.dueAt).toISOString() : null,
       tone: vocabTone(row.correct, row.wrong),
     })),
   }
