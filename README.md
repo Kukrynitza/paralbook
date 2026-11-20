@@ -20,6 +20,7 @@ npm install
 cd text-service
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python scripts\build_glosses.py
 .venv\Scripts\python run.py
 ```
 

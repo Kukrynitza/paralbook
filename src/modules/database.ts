@@ -52,6 +52,7 @@ export interface EnTokens {
   position: number
   text: string
   lemma: string | null
+  pos: string | null
   align: number | null
   ruAlign: number | null
 }
@@ -108,6 +109,12 @@ export interface Votes {
   userId: string
   textId: string
   score: number
+}
+
+export interface LemmaGlosses {
+  lemma: string
+  pos: string
+  gloss: string
 }
 
 export interface UserWords {
@@ -190,6 +197,7 @@ export interface Database {
   wordForms: WordForms
   collectionItems: CollectionItems
   votes: Votes
+  lemmaGlosses: LemmaGlosses
   userWords: UserWords
   activityDays: ActivityDays
   friendships: Friendships
@@ -207,6 +215,10 @@ const database = new Kysely<Database>({
     pool: new Pool({
       connectionString,
       max: process.env.VERCEL ? 1 : 3,
+      min: 1,
+      idleTimeoutMillis: 60_000,
+      connectionTimeoutMillis: 15_000,
+      keepAlive: true,
       ssl: supabase ? { rejectUnauthorized: false } : undefined
     })
   }),

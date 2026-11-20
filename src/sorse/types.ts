@@ -157,6 +157,7 @@ export type ChatMessage =
 export interface ReadToken {
   text: string
   lemma?: string
+  pos?: string
   translation?: string
   align?: number
   ruAlign?: number

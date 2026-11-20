@@ -1,6 +1,7 @@
 'use server'
 
 import database from '@/modules/database'
+import { labelsFor } from '@/sorse/gloss'
 import userId from '@/sorse/userId'
 import type { DictEntry } from '@/sorse/types'
 
@@ -8,7 +9,7 @@ function formOf(word: string) {
   return word.trim().toLowerCase()
 }
 
-export default async function selectWord(word: string): Promise<DictEntry> {
+export default async function selectWord(word: string, pos?: string): Promise<DictEntry> {
   const id = await userId()
   if (!id) {
     throw new Error('Нужно войти')
@@ -42,6 +43,10 @@ export default async function selectWord(word: string): Promise<DictEntry> {
     .where('lemma', '=', entry.lemma)
     .orderBy('position', 'asc')
     .execute()
+  const labels = labelsFor(pos)
+  const ordered = labels.length
+    ? [...senses].sort((left, right) => Number(labels.includes(right.pos)) - Number(labels.includes(left.pos)))
+    : senses
   const examples = senses.length
     ? await database
         .selectFrom('senseExamples')
@@ -65,7 +70,7 @@ export default async function selectWord(word: string): Promise<DictEntry> {
     hint: entry.hint,
     saved: Boolean(saved),
     senses: senses.length
-      ? senses.map((sense) => ({
+      ? ordered.map((sense) => ({
           pos: sense.pos,
           text: sense.text,
           examples: examples

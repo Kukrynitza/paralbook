@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from . import morph, segment
 from .dictionary import Dictionary
+from .lemmatize import annotate
 
 PAGE_WORDS = 450
 
@@ -176,6 +177,7 @@ def align_pages(english: str, russian: str, dictionary: Dictionary) -> list[dict
     en_words = [{"text": text, "norm": segment.bare(text)} for text in en_texts]
     for item in en_words:
         item["lemma"] = dictionary.resolve_lemma(item["norm"])
+    annotate(en_words, spaced=True)
 
     has_translation = bool(russian.strip())
     ru_words: list[dict] = []
@@ -223,6 +225,7 @@ def align_pages(english: str, russian: str, dictionary: Dictionary) -> list[dict
             en_tokens.append({
                 "text": token_text,
                 "lemma": item.get("lemma"),
+                "pos": item.get("pos"),
                 "align": align,
                 "ru_align": local,
             })

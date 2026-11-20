@@ -10,6 +10,7 @@ from .align import align_pages
 from .config import MAX_TRANSLATE_CHARS, MIN_UPLOAD_TEXT, WORDS_PER_MINUTE
 from .db import Database
 from .dictionary import Dictionary
+from .lemmatize import annotate_pages
 from .parsers import (
     Parsed,
     detect_language_info,
@@ -222,6 +223,7 @@ class JobManager:
             text_row = await self.db.get_text(text_id) or {}
             if parsed and parsed.pages is not None:
                 pages = parsed.pages
+                await asyncio.to_thread(annotate_pages, pages)
                 words = sum(1 for page in pages for item in page["en"] if item["text"].strip())
                 minutes = max(1, round(words / WORDS_PER_MINUTE))
                 current_title = (text_row.get("title") or "").strip()
@@ -298,7 +300,7 @@ class JobManager:
             require_translation(english, russian_text)
             english = validate_text(english)
             await self._update(job_id, stage="aligning", progress=85)
-            pages = align_pages(english, russian_text, self.dictionary)
+            pages = await asyncio.to_thread(align_pages, english, russian_text, self.dictionary)
             self._abort_if_cancelled(job_id)
             words = segment.word_count(english)
             minutes = max(1, round(words / WORDS_PER_MINUTE))

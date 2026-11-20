@@ -131,7 +131,7 @@ export default async function selectText(textId: string, requestedPage?: number,
           .execute(),
         database
           .selectFrom('enTokens')
-          .select(['pageId', 'text', 'align', 'ruAlign'])
+          .select(['pageId', 'text', 'lemma', 'pos', 'align', 'ruAlign'])
           .where('pageId', 'in', pageIds)
           .orderBy('pageId', 'asc')
           .orderBy('position', 'asc')
@@ -144,22 +144,47 @@ export default async function selectText(textId: string, requestedPage?: number,
     if (list) list.push({ text: row.text })
     else ruByPage.set(row.pageId, [{ text: row.text }])
   }
-  const enByPage = new Map<string, { text: string; align: number | null; ruAlign: number | null }[]>()
+  const enByPage = new Map<string, { text: string; lemma: string | null; pos: string | null; align: number | null; ruAlign: number | null }[]>()
   for (const row of enRows) {
     const list = enByPage.get(row.pageId)
     if (list) list.push(row)
     else enByPage.set(row.pageId, [row])
   }
   const forms = [...new Set(enRows.map((token) => bare(token.text)).filter(Boolean))]
+  const lemmas = new Set<string>()
+  for (const token of enRows) {
+    if (token.lemma) lemmas.add(token.lemma)
+    if (token.pos === 'NOUN' || token.pos === 'ADJ' || token.pos === 'PRON') {
+      const surface = bare(token.text)
+      if (surface) lemmas.add(surface)
+    }
+  }
+  const glossRows = lemmas.size
+    ? await database
+        .selectFrom('lemmaGlosses')
+        .select(['lemma', 'pos', 'gloss'])
+        .where('lemma', 'in', [...lemmas])
+        .execute()
+    : []
+  const glosses = new Map(glossRows.map((row) => [`${row.lemma}|${row.pos}`, row.gloss]))
+  const covered = (form: string, lemma: string | null, pos: string | null) => {
+    if (!form) return true
+    if (lemma && (glosses.has(`${lemma}|${pos ?? '*'}`) || glosses.has(`${lemma}|*`))) return true
+    if ((pos === 'NOUN' || pos === 'ADJ' || pos === 'PRON') && glosses.has(`${form}|${pos}`)) return true
+    return false
+  }
+  const needsFallback = enRows.some((row) => !covered(bare(row.text), row.lemma, row.pos))
   const known: KnownWord[] = []
-  for (let index = 0; index < forms.length; index += 500) {
-    const rows = await database
-      .selectFrom('wordForms')
-      .innerJoin('lemmas', 'lemmas.lemma', 'wordForms.lemma')
-      .select(['wordForms.formNorm', 'wordForms.lemma', 'lemmas.rank', 'lemmas.translation'])
-      .where('wordForms.formNorm', 'in', forms.slice(index, index + 500))
-      .execute()
-    known.push(...rows)
+  if (needsFallback) {
+    for (let index = 0; index < forms.length; index += 500) {
+      const rows = await database
+        .selectFrom('wordForms')
+        .innerJoin('lemmas', 'lemmas.lemma', 'wordForms.lemma')
+        .select(['wordForms.formNorm', 'wordForms.lemma', 'lemmas.rank', 'lemmas.translation'])
+        .where('wordForms.formNorm', 'in', forms.slice(index, index + 500))
+        .execute()
+      known.push(...rows)
+    }
   }
   const byForm = new Map<string, KnownWord[]>()
   for (const row of known) {
@@ -202,11 +227,24 @@ export default async function selectText(textId: string, requestedPage?: number,
           continue
         }
         const form = bare(part)
-        const match = form ? resolve(form) : undefined
+        let pos = row.pos ?? undefined
+        const surface = form && (row.pos === 'NOUN' || row.pos === 'ADJ' || row.pos === 'PRON') && glosses.has(`${form}|${row.pos}`) ? form : undefined
+        const chosen = surface ?? (row.lemma && (glosses.has(`${row.lemma}|${row.pos ?? '*'}`) || glosses.has(`${row.lemma}|*`)) ? row.lemma : undefined)
+        let lemma: string | undefined = chosen
+        let translation: string | undefined = chosen
+          ? glosses.get(`${chosen}|${row.pos ?? '*'}`) ?? glosses.get(`${chosen}|*`)
+          : undefined
+        if (!translation) {
+          const match = form ? resolve(form) : undefined
+          lemma = match?.lemma
+          translation = match?.translation ?? undefined
+          pos = undefined
+        }
         tokens.push({
           text: part,
-          lemma: match?.lemma,
-          translation: match?.translation ?? undefined,
+          lemma,
+          pos,
+          translation,
           align: row.align ?? undefined,
           ruAlign: row.ruAlign ?? undefined,
         })

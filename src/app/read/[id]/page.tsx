@@ -41,6 +41,7 @@ export default function Page() {
     index: number
     lemma: string
     translation?: string
+    pos?: string
     align?: number
     ruAlign?: number
     phase: 'gloss' | 'popup'
@@ -85,7 +86,7 @@ export default function Page() {
     let active = true
     setError('')
     setCache({})
-    selectText(id, undefined, 4)
+    selectText(id, undefined, 2)
       .then((value) => {
         if (!active) return
         merge(value)
@@ -199,23 +200,23 @@ export default function Page() {
     line.scrollBy({ left: delta, behavior })
   }, [hit, page])
 
-  async function onToken(index: number, lemma: string, translation?: string, align?: number, ruAlign?: number) {
+  async function onToken(index: number, lemma: string, translation?: string, pos?: string, align?: number, ruAlign?: number) {
     try {
       if (!data?.hasTranslation) {
-        const word = await selectWord(lemma)
+        const word = await selectWord(lemma, pos)
         setEntry(word)
         setSaved(Boolean(word.saved))
-        setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
+        setPick({ index, lemma, translation, pos, align, ruAlign, phase: 'popup' })
         return
       }
       if (pick?.index === index && pick.phase === 'gloss') {
-        const word = await selectWord(lemma)
+        const word = await selectWord(lemma, pos)
         setEntry(word)
         setSaved(Boolean(word.saved))
-        setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
+        setPick({ index, lemma, translation, pos, align, ruAlign, phase: 'popup' })
         return
       }
-      setPick({ index, lemma, translation, align, ruAlign, phase: 'gloss' })
+      setPick({ index, lemma, translation, pos, align, ruAlign, phase: 'gloss' })
     } catch (reason) {
       notify(reason instanceof Error ? reason.message : 'Не удалось открыть слово')
     }
@@ -320,7 +321,7 @@ export default function Page() {
                 key={index}
                 type="button"
                 className={pick?.index === index ? `${styles.token} ${styles.on}` : styles.token}
-                onClick={() => onToken(index, token.lemma!, token.translation, token.align, token.ruAlign)}
+                onClick={() => onToken(index, token.lemma!, token.translation, token.pos, token.align, token.ruAlign)}
               >
                 {token.text}
               </button>
