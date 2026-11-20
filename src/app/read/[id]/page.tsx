@@ -86,7 +86,7 @@ export default function Page() {
     let active = true
     setError('')
     setCache({})
-    selectText(id, undefined, 2)
+    selectText(id, undefined, 4)
       .then((value) => {
         if (!active) return
         merge(value)
