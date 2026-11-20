@@ -2,7 +2,7 @@
 
 import database from '@/modules/database'
 import userId from '@/sorse/userId'
-import { dayKey, touchStreak } from '@/sorse/query'
+import { dayKey } from '@/sorse/query'
 import type { StatBar, StatTotals, Stats, StatsRange } from '@/sorse/types'
 import { sql } from 'kysely'
 
@@ -66,74 +66,79 @@ export default async function selectStats(range: StatsRange = '7'): Promise<Stat
     throw new Error('Нужно войти')
   }
   const period = RANGES.includes(range) ? range : '7'
-  await touchStreak(database, id)
-  const profile = await database
-    .selectFrom('profiles')
-    .select('streak')
-    .where('id', '=', id)
-    .executeTakeFirst()
+  const [profile, todayRow, rows] = await Promise.all([
+    database
+      .selectFrom('profiles')
+      .select('streak')
+      .where('id', '=', id)
+      .executeTakeFirst(),
+    sql<{ day: string }>`select current_date::text as day`.execute(database),
+    sql<{ day: string; minutes: number; words: number }>`
+      select day::text as day, minutes::int as minutes, words::int as words
+      from activity_days
+      where user_id = ${id}
+    `.execute(database),
+  ])
   if (!profile) {
     throw new Error('Нужно войти')
   }
-  const todayRow = await sql<{ day: string }>`select current_date::text as day`.execute(database)
   const today = String(todayRow.rows[0]?.day ?? '').slice(0, 10)
   const weekStart = shiftDay(today, -6)
-  const rows = await sql<{ day: string; minutes: number; words: number }>`
-    select day::text as day, minutes::int as minutes, words::int as words
-    from activity_days
-    where user_id = ${id}
-  `.execute(database)
-  const knownRows = await sql<{ day: string; n: number }>`
-    select (due_at - interval '30 minutes')::date::text as day, count(*)::int as n
-    from user_words
-    where user_id = ${id}
-      and correct = 1 and wrong = 0 and interval_days = 1 and mastered = false
-    group by 1
-  `.execute(database)
-  const reviewedRows = await sql<{ day: string; n: number }>`
-    select day::text as day, count(*)::int as n
-    from (
-      select (
-        due_at - case interval_days
-          when 1 then interval '30 minutes'
-          when 2 then interval '12 hours'
-          when 3 then interval '1 day'
-          when 4 then interval '7 days'
-          when 5 then interval '30 days'
-          else interval '60 days'
-        end
-      )::date as day
+  const [knownRows, reviewedRows, masteredRows, counts] = await Promise.all([
+    sql<{ day: string; n: number }>`
+      select (due_at - interval '30 minutes')::date::text as day, count(*)::int as n
       from user_words
       where user_id = ${id}
-        and mastered = false
-        and interval_days between 1 and 6
-        and not (correct = 1 and wrong = 0 and interval_days = 1)
-    ) steps
-    group by day
-  `.execute(database)
-  const masteredRows = await sql<{ day: string; n: number }>`
-    select due_at::date::text as day, count(*)::int as n
-    from user_words
-    where user_id = ${id} and mastered = true and due_at is not null
-    group by 1
-  `.execute(database)
-  const counts = await sql<{ fresh: number; reviewed: number; known: number; mastered: number; weekMastered: number }>`
-    select
-      count(*) filter (where not (correct = 1 and wrong = 0 and interval_days = 1 and mastered = false))::int as fresh,
-      count(*) filter (
-        where (interval_days >= 1 or mastered)
-          and not (correct = 1 and wrong = 0 and interval_days = 1 and mastered = false)
-      )::int as reviewed,
-      count(*) filter (where correct = 1 and wrong = 0 and interval_days = 1 and mastered = false)::int as known,
-      count(*) filter (where mastered or correct >= 6)::int as mastered,
-      count(*) filter (
-        where (mastered or correct >= 6)
-          and due_at >= current_date - 6
-          and due_at < current_date + 1
-      )::int as week_mastered
-    from user_words
-    where user_id = ${id}
-  `.execute(database)
+        and correct = 1 and wrong = 0 and interval_days = 1 and mastered = false
+      group by 1
+    `.execute(database),
+    sql<{ day: string; n: number }>`
+      select day::text as day, count(*)::int as n
+      from (
+        select (
+          due_at - case interval_days
+            when 1 then interval '30 minutes'
+            when 2 then interval '2 hours'
+            when 3 then interval '1 day'
+            when 4 then interval '7 days'
+            else interval '60 days'
+          end
+        )::date as day
+        from user_words
+        where user_id = ${id}
+          and mastered = false
+          and interval_days between 1 and 6
+          and not (correct = 1 and wrong = 0 and interval_days = 1)
+      ) steps
+      group by day
+    `.execute(database),
+    sql<{ day: string; n: number }>`
+      select due_at::date::text as day, count(*)::int as n
+      from user_words
+      where user_id = ${id} and mastered = true and due_at is not null
+      group by 1
+    `.execute(database),
+    sql<{ fresh: number; reviewed: number; known: number; mastered: number; weekMastered: number }>`
+      select
+        count(*) filter (
+          where not mastered
+            and not (correct = 1 and wrong = 0 and interval_days = 1 and mastered = false)
+        )::int as fresh,
+        count(*) filter (
+          where (interval_days >= 1 or mastered)
+            and not (correct = 1 and wrong = 0 and interval_days = 1 and mastered = false)
+        )::int as reviewed,
+        count(*) filter (where correct = 1 and wrong = 0 and interval_days = 1 and mastered = false)::int as known,
+        count(*) filter (where mastered)::int as mastered,
+        count(*) filter (
+          where mastered
+            and due_at >= current_date - 6
+            and due_at < current_date + 1
+        )::int as week_mastered
+      from user_words
+      where user_id = ${id}
+    `.execute(database),
+  ])
   const added = new Map(rows.rows.map((item) => [dayKey(item.day), Number(item.words)]))
   const minutes = new Map(rows.rows.map((item) => [dayKey(item.day), Number(item.minutes)]))
   const known = new Map(knownRows.rows.map((item) => [dayKey(item.day), Number(item.n)]))

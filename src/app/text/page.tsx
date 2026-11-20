@@ -259,10 +259,12 @@ export default function Page() {
         ) : null}
         <form className="stack" onSubmit={(event) => void submitFile(event)}>
           <div className="card stack">
-            <label className="field">
+            <div className="field">
               <span>Файл книги</span>
               <input
+                id="book-file"
                 type="file"
+                className={styles.fileInput}
                 accept={ACCEPT}
                 disabled={pending}
                 onChange={(event) => {
@@ -271,10 +273,17 @@ export default function Page() {
                   if (next) setManual(false)
                 }}
               />
+              <label
+                htmlFor="book-file"
+                className="btn ghost slim"
+                style={{ width: 'auto', alignSelf: 'flex-start', pointerEvents: pending ? 'none' : undefined }}
+              >
+                {file ? 'Выбрать другой файл' : 'Выбрать файл'}
+              </label>
               <span className="muted">
                 {file ? file.name : 'TXT, FB2, EPUB, DOCX, Markdown, .2books — до 30 МБ · автоперевод до 200 000 символов'}
               </span>
-            </label>
+            </div>
             <label className="field">
               <span>Язык книги</span>
               <select className="input" value={language} onChange={(event) => setLanguage(event.target.value as Language)}>

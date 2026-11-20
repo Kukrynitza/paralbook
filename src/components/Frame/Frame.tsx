@@ -61,7 +61,9 @@ export default function Frame({
   return (
     <div className={className}>
       <aside className={styles.sidebar}>
-        <p className={styles.brand}>Paralbook</p>
+        <Link href="/" className={styles.brand} aria-label="На главную">
+          Paralbook
+        </Link>
         {tabs.map((item) => (
           <NavItem key={item.to} to={item.to} end={item.end} section={item.section}>
             <item.icon size={18} />

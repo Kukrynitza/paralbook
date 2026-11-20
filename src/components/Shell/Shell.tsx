@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Frame from '@/components/Frame/Frame'
+import TooltipLayer from '@/components/Tooltip/TooltipLayer'
 import { AuthProvider, UiProvider, useAuth } from '@/contexts/AuthContext'
 import { JobProvider } from '@/contexts/JobContext'
 import { ThemeProvider } from '@/contexts/ThemeContext'
@@ -44,6 +45,7 @@ export default function Shell({ children }: { children: ReactNode }) {
         <ThemeProvider>
           <JobProvider>
             <FrameForPath>{children}</FrameForPath>
+            <TooltipLayer />
           </JobProvider>
         </ThemeProvider>
       </UiProvider>

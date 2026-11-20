@@ -4,17 +4,21 @@ import database from '@/modules/database'
 import userId from '@/sorse/userId'
 import type { Cefr, ChatMessage, ChatText } from '@/sorse/types'
 
+const ONBOARDING = 'На какую тему сделать текст и сколько минут его читать?'
+
 export default async function selectChat(): Promise<{ messages: ChatMessage[] }> {
   const id = await userId()
   if (!id) {
     throw new Error('Нужно войти')
   }
-  const rows = await database
-    .selectFrom('chatMessages')
-    .select(['id', 'role', 'body', 'textId', 'retryTopic', 'retryMinutes', 'retryLevel'])
-    .where('userId', '=', id)
-    .orderBy('createdAt', 'asc')
-    .execute()
+  const rows = (
+    await database
+      .selectFrom('chatMessages')
+      .select(['id', 'role', 'body', 'textId', 'retryTopic', 'retryMinutes', 'retryLevel'])
+      .where('userId', '=', id)
+      .orderBy('createdAt', 'asc')
+      .execute()
+  ).filter((row) => !(row.role === 'assistant' && row.body === ONBOARDING))
   const textIds = rows.flatMap((item) => (item.textId ? [item.textId] : []))
   const texts = textIds.length
     ? await database

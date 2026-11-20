@@ -100,24 +100,59 @@ export async function friendsOf(db: Db, userId: string): Promise<Friend[]> {
     .orderBy('friendships.createdAt', 'asc')
     .execute()
   if (!rows.length) return []
-  const activity = await db
-    .selectFrom('activityDays')
-    .select(['userId', 'minutes'])
-    .where('userId', 'in', rows.map((item) => item.id))
-    .where(sql<boolean>`day = current_date`)
-    .execute()
+  const ids = rows.map((item) => item.id)
+  const [activity, week] = await Promise.all([
+    db
+      .selectFrom('activityDays')
+      .select(['userId', 'minutes'])
+      .where('userId', 'in', ids)
+      .where(sql<boolean>`day = current_date`)
+      .execute(),
+    db
+      .selectFrom('activityDays')
+      .select(['userId'])
+      .select(sql<number>`coalesce(sum(minutes), 0)::int`.as('minutes'))
+      .select(sql<number>`coalesce(sum(words), 0)::int`.as('words'))
+      .select(sql<number>`count(*) filter (where minutes > 0 or words > 0)::int`.as('days'))
+      .where('userId', 'in', ids)
+      .where(sql<boolean>`day >= current_date - 6`)
+      .groupBy('userId')
+      .execute(),
+  ])
   const minutes = new Map(activity.map((item) => [item.userId, Number(item.minutes)]))
+  const weekly = new Map(week.map((item) => [item.userId, item]))
   return rows.map((item) => {
     const today = minutes.get(item.id) ?? 0
     const shown = item.showMinutes ? today : 0
+    const stats = weekly.get(item.id)
     return {
       id: item.id,
       name: displayName(item.email),
       minutesToday: shown,
       minutesLabel: item.showMinutes ? (shown > 0 ? `${shown} мин` : 'Ещё не занимался') : 'Минуты скрыты',
+      showMinutes: item.showMinutes,
       streak: item.streak,
+      weekMinutes: item.showMinutes ? Number(stats?.minutes ?? 0) : 0,
+      weekWords: Number(stats?.words ?? 0),
+      weekDays: Number(stats?.days ?? 0),
     }
   })
+}
+
+export async function weekActivity(db: Db, userId: string): Promise<{ minutes: number; words: number; days: number }> {
+  const row = await db
+    .selectFrom('activityDays')
+    .select(sql<number>`coalesce(sum(minutes), 0)::int`.as('minutes'))
+    .select(sql<number>`coalesce(sum(words), 0)::int`.as('words'))
+    .select(sql<number>`count(*) filter (where minutes > 0 or words > 0)::int`.as('days'))
+    .where('userId', '=', userId)
+    .where(sql<boolean>`day >= current_date - 6`)
+    .executeTakeFirst()
+  return {
+    minutes: Number(row?.minutes ?? 0),
+    words: Number(row?.words ?? 0),
+    days: Number(row?.days ?? 0),
+  }
 }
 
 export function vocabTone(correct: number, wrong: number): VocabItem['tone'] {
@@ -152,10 +187,21 @@ export async function ensureWord(db: Db, userId: string, lemma: string, countTod
       intervalDays: 0,
       ease: 2.5,
     })
+    .onConflict((conflict) => conflict.doNothing())
     .returning('id')
-    .executeTakeFirstOrThrow()
-  if (countToday) await addActivity(db, userId, 0, 1)
-  return created.id
+    .executeTakeFirst()
+  if (created) {
+    if (countToday) await addActivity(db, userId, 0, 1)
+    return created.id
+  }
+  const raced = await db
+    .selectFrom('userWords')
+    .select('id')
+    .where('userId', '=', userId)
+    .where('lemma', '=', known.lemma)
+    .executeTakeFirst()
+  if (!raced) throw new Error('Не удалось добавить слово')
+  return raced.id
 }
 
 export async function vocabById(db: Db, userId: string, itemId: string): Promise<VocabItem> {
@@ -169,6 +215,8 @@ export async function vocabById(db: Db, userId: string, itemId: string): Promise
       'userWords.correct',
       'userWords.wrong',
       'userWords.mastered',
+      'userWords.intervalDays',
+      'userWords.dueAt',
       'userWords.contextEn',
       'lemmas.ipa',
       'lemmas.translation',
@@ -190,6 +238,8 @@ export async function vocabById(db: Db, userId: string, itemId: string): Promise
     correct: row.correct,
     wrong: row.wrong,
     mastered: row.mastered,
+    intervalDays: Number(row.intervalDays ?? 0),
+    dueAt: row.dueAt ? new Date(row.dueAt).toISOString() : null,
     tone: vocabTone(row.correct, row.wrong),
   }
 }
@@ -210,7 +260,7 @@ export async function cardOf(db: Db, userId: string, lemma: string): Promise<Ses
   if (!known) return null
   const word = await db
     .selectFrom('userWords')
-    .select(['hint', 'correct', 'contextEn'])
+    .select(['hint', 'correct', 'wrong', 'contextEn'])
     .where('userId', '=', userId)
     .where('lemma', '=', lemma)
     .executeTakeFirst()
@@ -242,6 +292,7 @@ export async function cardOf(db: Db, userId: string, lemma: string): Promise<Ses
     level: known.level,
     band: bandOf(known.rank),
     review: word?.correct ?? 0,
+    isNew: !word || (Number(word.correct) === 0 && Number(word.wrong) === 0),
     examples,
   }
 }

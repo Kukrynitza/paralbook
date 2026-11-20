@@ -11,7 +11,7 @@ import selectToday from '@/actions/Collection/selectToday'
 import deleteText from '@/actions/Reading/deleteText'
 import voteLibrary from '@/actions/Library/voteLibrary'
 import { type CollectionItem, type PageResult, type Today } from '@/sorse/types'
-import { useUi } from '@/contexts/AuthContext'
+import { useAuth, useUi } from '@/contexts/AuthContext'
 import { useJobs } from '@/contexts/JobContext'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import PublishedBadge from '@/components/PublishedBadge/PublishedBadge'
@@ -19,6 +19,7 @@ import Pager from '@/components/Pager/Pager'
 import Ring from '@/components/Ring/Ring'
 import Stars from '@/components/Stars/Stars'
 import dayWord from '@/sorse/dayWord'
+import { readResume, type ResumeEntry } from '@/sorse/resume'
 import friendStyles from '@/components/FriendCard/FriendCard.module.css'
 import styles from './page.module.css'
 
@@ -30,11 +31,14 @@ const sorts = [
 
 export default function Page() {
   const { confirm, notify } = useUi()
+  const { user } = useAuth()
+  const owner = user?.id
   const { revision } = useJobs()
   const [sort, setSort] = useState('new')
   const [page, setPage] = useState(1)
   const [today, setToday] = useState<Today | null>(null)
   const [list, setList] = useState<PageResult<CollectionItem> | null>(null)
+  const [resume, setResume] = useState<ResumeEntry | null>(null)
   const [error, setError] = useState('')
   const [publishing, setPublishing] = useState<CollectionItem | null>(null)
   const [publishBusy, setPublishBusy] = useState(false)
@@ -58,6 +62,13 @@ export default function Page() {
       active = false
     }
   }, [page, sort, revision])
+
+  useEffect(() => {
+    const sync = () => setResume(readResume(owner))
+    sync()
+    window.addEventListener('focus', sync)
+    return () => window.removeEventListener('focus', sync)
+  }, [owner])
 
   async function remove(item: CollectionItem) {
     const ok = await confirm(item.source === 'chat' && !item.published ? 'Удалить текст?' : 'Убрать текст из подборки?')
@@ -123,12 +134,23 @@ export default function Page() {
           </Link>
         </div>
       </header>
+      {resume ? (
+        <section className={styles.section}>
+          <Link href={`/read/${resume.id}`} className={`card ${styles.resume}`}>
+            <span className="muted small">Продолжить чтение</span>
+            <strong>{resume.title}</strong>
+            <span className="muted small">
+              {Math.round(resume.progress * 100)}% · страница {Math.min(resume.page + 1, resume.pageCount)} из {resume.pageCount}
+            </span>
+          </Link>
+        </section>
+      ) : null}
       {error ? <p className="form-error pad">{error}</p> : null}
       {today ? (
         <section className={styles.section}>
           <div className="row">
             <h2>Сегодня</h2>
-            <Link href="/stats" className="chip">
+            <Link href="/stats" className="chip" data-tip="Статистика чтения и слов">
               Статистика
             </Link>
           </div>
@@ -168,6 +190,11 @@ export default function Page() {
             Все
           </Link>
         </div>
+        {today && today.friends.length === 0 ? (
+          <p className={`small muted ${styles.friendsEmpty}`}>
+            Пока никого нет. Добавьте друга на странице «Друзья».
+          </p>
+        ) : null}
         {today?.friends.map((friend) => (
           <div className={friendStyles.friend} key={friend.id}>
             <div className={friendStyles.avatar}>{friend.name.slice(0, 1)}</div>
@@ -175,7 +202,7 @@ export default function Page() {
               <div className={friendStyles.name}>{friend.name}</div>
               <div className={friendStyles.sub}>{friend.minutesLabel}</div>
             </div>
-            <div className={friendStyles.streak}>
+            <div className={friendStyles.streak} data-tip="Серия дней подряд">
               {friend.streak} {dayWord(friend.streak)}
               <small>серия</small>
             </div>
@@ -214,6 +241,7 @@ export default function Page() {
                 <button
                   type="button"
                   className={item.pinned ? styles.pinOn : styles.pin}
+                  aria-label={item.pinned ? 'Открепить' : 'Закрепить'}
                   onClick={() => pin(item)}
                 >
                   <Pin size={16} fill={item.pinned ? 'currentColor' : 'none'} />

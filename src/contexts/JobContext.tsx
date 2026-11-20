@@ -35,6 +35,10 @@ interface JobsValue {
 const STORAGE_KEY = 'paralbook.jobs.v1'
 const JobsContext = createContext<JobsValue | null>(null)
 
+function storageKey(owner: string) {
+  return `${STORAGE_KEY}:${owner}`
+}
+
 function statusLabel(stage: string | null) {
   if (stage === 'uploading') return 'Загружаю файл'
   if (stage === 'queued') return 'В очереди'
@@ -47,9 +51,9 @@ function statusLabel(stage: string | null) {
   return 'Обрабатываю'
 }
 
-function readStored(): JobState[] {
+function readStored(owner: string): JobState[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(storageKey(owner))
     const value = raw ? JSON.parse(raw) : []
     return Array.isArray(value)
       ? value.filter(
@@ -88,7 +92,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
   const jobsRef = useRef<JobState[]>([])
   const polling = useRef(new Set<string>())
   const finished = useRef(new Set<string>())
-  const loaded = useRef(false)
+  const loadedUser = useRef<string | null>(null)
 
   useEffect(() => {
     jobsRef.current = jobs
@@ -96,9 +100,9 @@ export function JobProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user) return
-    if (!loaded.current) {
-      loaded.current = true
-      setJobs(readStored())
+    if (loadedUser.current !== user.id) {
+      loadedUser.current = user.id
+      setJobs(readStored(user.id))
     }
     let active = true
     const startedAt = Date.now()
@@ -207,7 +211,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
           job.status !== 'error' &&
           job.status !== 'cancelled',
       )
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(active))
+      localStorage.setItem(storageKey(user.id), JSON.stringify(active))
     } catch {
       // localStorage может быть недоступен
     }

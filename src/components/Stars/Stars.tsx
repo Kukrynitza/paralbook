@@ -19,6 +19,7 @@ export default function Stars({
           type="button"
           className={value <= fill ? `${styles.star} ${styles.on}` : styles.star}
           aria-label={String(value)}
+          data-tip={`Оценка ${value} из 5`}
           onClick={() => onPick?.(value)}
         >
           <Star size={16} fill={value <= fill ? 'currentColor' : 'none'} />

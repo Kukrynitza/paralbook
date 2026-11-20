@@ -8,6 +8,7 @@ export type ThemePref = 'system' | 'light' | 'dark'
 export interface User {
   id: string
   email: string
+  friendCode: string
   cefr: Cefr
   interests: string[]
   dailyGoalMin: number
@@ -44,7 +45,17 @@ export interface Friend {
   name: string
   minutesToday: number
   minutesLabel: string
+  showMinutes: boolean
   streak: number
+  weekMinutes: number
+  weekWords: number
+  weekDays: number
+}
+
+export interface WeekActivity {
+  minutes: number
+  words: number
+  days: number
 }
 
 export interface Today {
@@ -194,6 +205,8 @@ export interface VocabItem {
   correct: number
   wrong: number
   mastered: boolean
+  intervalDays: number
+  dueAt: string | null
   tone: 'ok' | 'error'
 }
 
@@ -210,6 +223,7 @@ export interface SessionCard {
   level: string | null
   band: string | null
   review: number
+  isNew: boolean
   examples: { textEn: string; textRu: string | null }[]
 }
 

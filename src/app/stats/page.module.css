@@ -36,6 +36,14 @@
   height: 230px;
 }
 
+.fit .day {
+  width: 40px;
+}
+
+.fit .stack {
+  width: 30px;
+}
+
 .day {
   width: 52px;
   flex: none;
@@ -59,6 +67,7 @@
   min-height: 2px;
   background: var(--border);
   transform-origin: center bottom;
+  transition: height 260ms ease, opacity 220ms ease;
   animation: bar-grow 640ms ease;
 }
 

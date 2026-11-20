@@ -2,22 +2,16 @@
 
 import { sql } from 'kysely'
 import database from '@/modules/database'
+import { nextReview, reviewMinutes, type StoredReviewState } from '@/sorse/intervals'
 import { shortHint } from '@/sorse/hint'
 import { addActivity } from '@/sorse/query'
 import userId from '@/sorse/userId'
 
-const STEP = [
-  "interval '30 minutes'",
-  "interval '12 hours'",
-  "interval '1 day'",
-  "interval '7 days'",
-  "interval '30 days'",
-  "interval '60 days'",
-] as const
-
-function dueAtFor(step: number, remembered: boolean, mastered: boolean) {
-  if (remembered && !mastered && step >= 1 && step <= STEP.length) return sql<Date>`now() + ${sql.raw(STEP[step - 1])}`
-  return sql<Date>`now()`
+function dueAtFor(state: StoredReviewState, remembered: boolean) {
+  if (!remembered || state.mastered || state.intervalDays < 1) return sql<Date>`now()`
+  const minutes = reviewMinutes(state.intervalDays)
+  if (minutes === null) return sql<Date>`now()`
+  return sql<Date>`now() + (${minutes} * interval '1 minute')`
 }
 
 export default async function practiceWord(lemma: string, remembered: boolean) {
@@ -33,47 +27,64 @@ export default async function practiceWord(lemma: string, remembered: boolean) {
       .where('userId', '=', id)
       .where('lemma', '=', known.lemma)
       .executeTakeFirst()
+    const state = nextReview(row, remembered)
+    if (!state) return
+    const dueAt = dueAtFor(state, remembered)
     const ease = Number(row?.ease ?? 2.5)
-    if (row?.mastered) return
-    let correct = row?.correct ?? 0
-    let wrong = row?.wrong ?? 0
-    let step = row?.intervalDays ?? 0
-    let mastered = false
-    if (remembered) {
-      correct += 1
-      if (correct >= 6) {
-        correct = 6
-        mastered = true
-        step = 6
-      } else {
-        step = correct
-      }
-    } else {
-      wrong += 1
-    }
-    const dueAt = dueAtFor(step, remembered, mastered)
     if (row) {
       await trx
         .updateTable('userWords')
-        .set({ correct, wrong, intervalDays: step, ease, dueAt, mastered })
+        .set({
+          correct: state.correct,
+          wrong: state.wrong,
+          intervalDays: state.intervalDays,
+          ease,
+          dueAt,
+          mastered: state.mastered,
+        })
         .where('id', '=', row.id)
         .execute()
       return
     }
-    await trx
+    const created = await trx
       .insertInto('userWords')
       .values({
         userId: id,
         lemma: known.lemma,
         hint: shortHint(known.hint ?? ''),
-        correct,
-        wrong,
-        mastered,
+        correct: state.correct,
+        wrong: state.wrong,
+        mastered: state.mastered,
         dueAt,
-        intervalDays: step,
+        intervalDays: state.intervalDays,
         ease,
       })
+      .onConflict((conflict) => conflict.doNothing())
+      .returning('id')
+      .executeTakeFirst()
+    if (created) {
+      await addActivity(trx, id, 0, 1)
+      return
+    }
+    const raced = await trx
+      .selectFrom('userWords')
+      .select(['id', 'correct', 'wrong', 'intervalDays', 'ease', 'mastered'])
+      .where('userId', '=', id)
+      .where('lemma', '=', known.lemma)
+      .executeTakeFirst()
+    const racedState = nextReview(raced, remembered)
+    if (!raced || !racedState) return
+    await trx
+      .updateTable('userWords')
+      .set({
+        correct: racedState.correct,
+        wrong: racedState.wrong,
+        intervalDays: racedState.intervalDays,
+        ease: Number(raced.ease ?? 2.5),
+        dueAt: dueAtFor(racedState, remembered),
+        mastered: racedState.mastered,
+      })
+      .where('id', '=', raced.id)
       .execute()
-    await addActivity(trx, id, 0, 1)
   })
 }

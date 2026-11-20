@@ -7,10 +7,11 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from . import llm
 from .auth import can_access_job, internal_ok, verify_user_token
+from .tts import synthesize
 from .config import (
     LLM_API_KEY,
     LLM_BASE_URL,
@@ -123,6 +124,20 @@ async def ensure_text_owner(text_id: str, user_id: str) -> dict:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "version": "1.0.0", "dictionary": dictionary.stats}
+
+
+@app.get("/v1/tts")
+async def tts(text: str, x_service_token: str | None = Header(default=None)) -> Response:
+    if not internal_ok(x_service_token):
+        raise HTTPException(status_code=401, detail="Нет доступа к сервису")
+    try:
+        audio = await synthesize(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        log.exception("tts failed")
+        raise HTTPException(status_code=502, detail="Сервис озвучки недоступен") from exc
+    return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/v1/config")

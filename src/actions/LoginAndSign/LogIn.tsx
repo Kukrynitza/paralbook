@@ -31,6 +31,7 @@ export default async function logIn(user: LogInUser) {
   cookieStore.set('session', token, {
     expires: expiresAt,
     httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
     path: '/',
     sameSite: 'lax'
   })

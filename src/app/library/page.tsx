@@ -23,12 +23,24 @@ export default function Page() {
   const [sort, setSort] = useState('new')
   const [page, setPage] = useState(1)
   const [list, setList] = useState<PageResult<LibraryItem> | null>(null)
+  const [error, setError] = useState('')
 
   useEffect(() => {
+    let active = true
+    setError('')
     const handle = window.setTimeout(() => {
-      selectLibrary(query, sort, page).then(setList)
+      selectLibrary(query, sort, page)
+        .then((data) => {
+          if (active) setList(data)
+        })
+        .catch((reason: unknown) => {
+          if (active) setError(reason instanceof Error ? reason.message : 'Не удалось загрузить библиотеку')
+        })
     }, 200)
-    return () => window.clearTimeout(handle)
+    return () => {
+      active = false
+      window.clearTimeout(handle)
+    }
   }, [page, query, sort])
 
   async function vote(item: LibraryItem, value: number) {
@@ -51,13 +63,17 @@ export default function Page() {
 
   async function save(item: LibraryItem) {
     if (item.saved) return
-    await saveLibrary(item.id)
-    setList((current) =>
-      current
-        ? { ...current, items: current.items.map((entry) => (entry.id === item.id ? { ...entry, saved: true } : entry)) }
-        : current,
-    )
-    notify('В подборке')
+    try {
+      await saveLibrary(item.id)
+      setList((current) =>
+        current
+          ? { ...current, items: current.items.map((entry) => (entry.id === item.id ? { ...entry, saved: true } : entry)) }
+          : current,
+      )
+      notify('В подборке')
+    } catch (reason: unknown) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось добавить в подборку')
+    }
   }
 
   const empty = list && query.trim() && list.total === 0
@@ -106,6 +122,7 @@ export default function Page() {
           </button>
         ))}
       </div>
+      {error ? <p className="form-error pad">{error}</p> : null}
       {empty ? (
         <div className="empty">
           <Search size={28} />

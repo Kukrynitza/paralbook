@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Flame } from 'lucide-react'
 import selectStats from '@/actions/Stats/selectStats'
+import { niceMax } from '@/sorse/stats'
 import { type StatBar, type StatTotals, type Stats, type StatsRange } from '@/sorse/types'
 import styles from './page.module.css'
 
@@ -26,19 +27,35 @@ export default function Page() {
   const router = useRouter()
   const [range, setRange] = useState<StatsRange>('7')
   const [stats, setStats] = useState<Stats | null>(null)
+  const [error, setError] = useState('')
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let active = true
-    selectStats(range).then((next) => {
-      if (active) setStats(next)
-    })
+    setError('')
+    selectStats(range)
+      .then((next) => {
+        if (active) setStats(next)
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : 'Не удалось загрузить статистику')
+      })
     return () => {
       active = false
     }
   }, [range])
 
-  if (!stats) return <p className="loading">Загрузка…</p>
-  const max = Math.max(1, ...stats.days.map((day) => day.fresh + day.reviewed + day.known + day.mastered))
+  useEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+    const frame = window.requestAnimationFrame(() => {
+      element.scrollLeft = element.scrollWidth - element.clientWidth
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [stats])
+
+  if (!stats) return <p className={error ? 'form-error pad' : 'loading'}>{error || 'Загрузка…'}</p>
+  const max = niceMax(Math.max(1, ...stats.days.map((day) => day.fresh + day.reviewed + day.known + day.mastered)))
 
   return (
     <div>
@@ -49,6 +66,7 @@ export default function Page() {
         <h1>Статистика</h1>
       </header>
       <div className="pad stack">
+        {error ? <p className="form-error">{error}</p> : null}
         <article className="card">
           <div className="row">
             <Flame color="var(--accent)" />
@@ -78,10 +96,10 @@ export default function Page() {
               <span>{Math.round(max / 2)}</span>
               <span>0</span>
             </div>
-            <div className={styles.scroll}>
-              <div className={styles.chart}>
+            <div className={styles.scroll} ref={scrollRef}>
+              <div className={range === '7' ? `${styles.chart} ${styles.fit}` : styles.chart}>
                 {stats.days.map((day) => (
-                  <Bar key={`${range}-${day.label}`} day={day} max={max} />
+                  <Bar key={day.label} day={day} max={max} />
                 ))}
               </div>
             </div>

@@ -4,10 +4,6 @@
   color: var(--muted);
 }
 
-.tools :global(.icon-btn[aria-label]):hover::after {
-  content: none;
-}
-
 .popover {
   display: flex;
   flex-wrap: wrap;

@@ -13,7 +13,7 @@ import publishCollection from '@/actions/Collection/publishCollection'
 import deleteText from '@/actions/Reading/deleteText'
 import { LEVELS, type Cefr, type ChatMessage, type LlmSettingsView } from '@/sorse/types'
 import { useAuth, useUi } from '@/contexts/AuthContext'
-import { statusLabel, useJobs } from '@/contexts/JobContext'
+import { useJobs } from '@/contexts/JobContext'
 import ConfirmDialog from '@/components/ConfirmDialog/ConfirmDialog'
 import PublishedBadge from '@/components/PublishedBadge/PublishedBadge'
 import LlmNotice from '@/components/LlmNotice/LlmNotice'
@@ -54,6 +54,7 @@ export default function Page() {
   const { confirm, notify, notifyError } = useUi()
   const { trackJob, jobs, revision, busyJob } = useJobs()
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -87,6 +88,7 @@ export default function Page() {
   async function load() {
     const data = await selectChat()
     setMessages(data.messages)
+    setLoaded(true)
   }
 
   useEffect(() => {
@@ -94,8 +96,14 @@ export default function Page() {
     syncChatJobs()
       .catch(() => undefined)
       .then(() => selectChat())
-      .then((data) => active && setMessages(data.messages))
+      .then((data) => {
+        if (!active) return
+        setMessages(data.messages)
+      })
       .catch(() => undefined)
+      .finally(() => {
+        if (active) setLoaded(true)
+      })
     return () => {
       active = false
     }
@@ -247,7 +255,8 @@ export default function Page() {
       </header>
       <p className={styles.lead}>Опишите тему — соберу текст с переводом</p>
       <div className={styles.thread} style={{ flex: 1 }}>
-        {!messages.length && !pending && !busyJob ? (
+        {!loaded ? <p className="loading">Загрузка…</p> : null}
+        {loaded && !messages.length && !pending && !busyJob ? (
           <div className={styles.empty}>
             <span className={styles.emptyIcon}>
               <Sparkles size={20} />
@@ -376,35 +385,22 @@ export default function Page() {
           <LlmNotice kind="service" />
         </div>
       ) : null}
-      {busyJob ? (
-        <div className={styles.busy}>
-          <strong>Сейчас выполняется: {busyJob.title}</strong>
-          <div className="bar"><i style={{ width: `${Math.max(2, busyJob.progress)}%` }} /></div>          <div className="row small muted">
-            <span>{statusLabel(busyJob.stage)}</span>
-            <span>{busyJob.progress}%</span>
-          </div>
-          <p className="small muted" style={{ margin: 0 }}>
-            Новый запрос можно отправить после завершения. Можно уйти — прогресс останется внизу, там же можно отменить.
-          </p>
-        </div>
-      ) : (
-        <form
-          className={styles.composer}
-          onSubmit={(event) => {
-            event.preventDefault()
-            void send(draft)
-          }}
-        >
-          <Link className={styles.own} href="/text">
-            <FilePlus size={15} />
-            Добавить текст
-          </Link>
-          <input className="input" value={draft} placeholder="Тема и время чтения" onChange={(event) => setDraft(event.target.value)} />
-          <button className={styles.send} aria-label="Отправить" title="Отправить" disabled={pending}>
-            →
-          </button>
-        </form>
-      )}
+      <form
+        className={styles.composer}
+        onSubmit={(event) => {
+          event.preventDefault()
+          void send(draft)
+        }}
+      >
+        <Link className={styles.own} href="/text">
+          <FilePlus size={15} />
+          Добавить текст
+        </Link>
+        <input className="input" value={draft} placeholder="Тема и время чтения" onChange={(event) => setDraft(event.target.value)} />
+        <button className={styles.send} aria-label="Отправить" title="Отправить" disabled={pending || Boolean(busyJob)}>
+          →
+        </button>
+      </form>
       <ConfirmDialog
         open={Boolean(publishingId)}
         title="Опубликовать текст?"

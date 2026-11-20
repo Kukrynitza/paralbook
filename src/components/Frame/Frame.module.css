@@ -26,10 +26,22 @@
   overflow: auto;
 }
 
-.brand {
+.sidebar a.brand {
+  display: block;
+  width: auto;
+  margin: 0 8px 16px;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
   font-size: 20px;
   font-weight: 700;
-  margin: 0 8px 16px;
+  line-height: 24px;
+  text-decoration: none;
+}
+
+.sidebar a.brand:hover {
+  background: transparent;
+  color: var(--accent);
 }
 
 .sidebar a {
