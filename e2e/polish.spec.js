@@ -21,7 +21,7 @@ test('after cancel the chat is ready for a new request', async ({ page }) => {
   await page.goto('http://localhost:5173/chat')
   await page.getByPlaceholder('Тема и время чтения').fill('PW Cancel Polish, 60 минут')
   await page.getByRole('button', { name: 'Отправить' }).click()
-  await expect(page.getByText('Сейчас выполняется: PW Cancel Polish')).toBeVisible({ timeout: 30000 })
+  await expect(page.getByRole('button', { name: 'Отправить' })).toBeDisabled({ timeout: 30000 })
   await page.waitForTimeout(1200)
   await page.getByRole('button', { name: 'Отменить' }).first().click()
   await page.getByRole('dialog', { name: 'Остановить генерацию?' }).getByRole('button', { name: 'Остановить' }).click()
@@ -33,7 +33,7 @@ test('after cancel the chat is ready for a new request', async ({ page }) => {
 
   await input.fill('PW Second Chat, 5 минут')
   await page.getByRole('button', { name: 'Отправить' }).click()
-  await expect(page.getByText('Сейчас выполняется: PW Second Chat')).toBeVisible({ timeout: 30000 })
+  await expect(page.getByRole('button', { name: 'Отправить' })).toBeDisabled({ timeout: 30000 })
   await page.getByRole('button', { name: 'Отменить' }).first().click()
   await page.getByRole('dialog', { name: 'Остановить генерацию?' }).getByRole('button', { name: 'Остановить' }).click()
   await expect(input).toBeVisible({ timeout: 30000 })

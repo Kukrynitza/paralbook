@@ -13,11 +13,11 @@ from .dictionary import Dictionary
 from .parsers import (
     Parsed,
     detect_language_info,
+    language_sample,
     normalize_text,
     parse_file,
     title_from_text,
     validate_language,
-    validate_pages_language,
     validate_text,
 )
 
@@ -27,7 +27,7 @@ log = logging.getLogger("text-service.jobs")
 def validate_output_language(text: str, field: str, allowed: tuple[str, ...]) -> None:
     value = (text or "").strip()
     if len(value) >= 80:
-        validate_language(value, field, allowed)
+        validate_language(language_sample(value), field, allowed)
 
 
 class JobBusy(Exception):
@@ -207,14 +207,17 @@ class JobManager:
                 if not english and not russian_text:
                     raise ValueError("Введите английский или русский текст")
             if parsed and parsed.pages is not None:
-                validate_pages_language(parsed.pages)
+                # .2books содержит готовую параллельную пару; язык исходника
+                # не ограничиваем, чтобы можно было читать не-английские пары.
+                pass
             elif english and russian_text:
-                validate_language(english, "Поле «Английский текст»", ("en",))
-                validate_language(russian_text, "Поле «Русский текст»", ("ru",))
+                # Парный текст: пользователь уже предоставил перевод,
+                # LLM не вызывается, язык не ограничиваем.
+                pass
             elif english:
-                validate_language(english, "Текст", ("en", "ru"))
+                validate_language(language_sample(english), "Текст", ("en", "ru"))
             elif russian_text:
-                validate_language(russian_text, "Текст", ("ru",))
+                validate_language(language_sample(russian_text), "Текст", ("ru",))
             await self._update(job_id, stage="aligning", progress=25)
             text_row = await self.db.get_text(text_id) or {}
             if parsed and parsed.pages is not None:
@@ -240,7 +243,7 @@ class JobManager:
                     "warnings": parsed.warnings,
                 })
                 return
-            detected = detect_language_info(english or russian_text)["code"]
+            detected = detect_language_info(language_sample(english or russian_text))["code"]
 
             async def progress(value_: int) -> None:
                 await self._update(job_id, progress=max(30, min(80, value_)))

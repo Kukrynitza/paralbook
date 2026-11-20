@@ -537,6 +537,11 @@ def _sample_text(text: str, limit: int = 1500, chunks: int = 7) -> str:
     return "\n".join(clean[start:start + limit] for start in starts)
 
 
+def language_sample(text: str, limit: int = 1500, chunks: int = 7) -> str:
+    """Несколько равномерных фрагментов текста для определения языка."""
+    return _sample_text(text, limit, chunks)
+
+
 def _script_counts(text: str) -> tuple[int, int]:
     latin = len(re.findall(r"[A-Za-z]", text or ""))
     cyrillic = len(re.findall(r"[А-Яа-яЁё]", text or ""))

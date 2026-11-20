@@ -224,6 +224,7 @@ export default function Page() {
   async function addWord() {
     if (!entry || saving) return
     if (saved) {
+      setPick(null)
       setRemoveOpen(true)
       return
     }
@@ -231,6 +232,7 @@ export default function Page() {
     const limit = readDailyNew(owner) + day.extra
     if (dailyUsed(day) >= limit) {
       setExtraCount(5)
+      setPick(null)
       setLimitOpen(true)
       return
     }

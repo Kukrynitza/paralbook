@@ -56,7 +56,6 @@ function Study() {
   const [packs, setPacks] = useState<string[]>(() => (search.get('packs') || '').split(',').filter(Boolean))
   const [daily, setDaily] = useState(10)
   const [plan, setPlan] = useState(10)
-  const [targets, setTargets] = useState<string[]>([])
   const [completed, setCompleted] = useState<string[]>([])
   const [phase, setPhase] = useState<Phase>('collect')
   const [queue, setQueue] = useState<string[]>([])
@@ -108,7 +107,6 @@ function Study() {
     const budget = kind === 'review' ? 0 : remainingNew(base, day)
     setDaily(base)
     setPlan(nextPlan)
-    setTargets(day.targets)
     setCompleted(day.completed)
     const pendingTargets = day.targets.filter((lemma) => !day.completed.includes(lemma))
     const load = (next: StudyDeck) => {
@@ -262,7 +260,6 @@ function Study() {
   async function finishCollect(lastLemma?: string) {
     await Promise.allSettled([...pending.current.values()])
     const day = readDayState(owner)
-    setTargets(day.targets)
     setCompleted(day.completed)
     const pendingTargets = day.targets.filter((lemma) => !day.completed.includes(lemma))
     const ordered = lastLemma && pendingTargets.length > 1 && pendingTargets.includes(lastLemma)
@@ -291,7 +288,6 @@ function Study() {
   async function finishRepeat() {
     await Promise.allSettled([...pending.current.values()])
     const day = readDayState(owner)
-    setTargets(day.targets)
     setCompleted(day.completed)
     const pendingTargets = day.targets.filter((lemma) => !day.completed.includes(lemma))
     const due = [...dueSet.current]
@@ -363,8 +359,7 @@ function Study() {
       post(lemma, true)
     } else {
       if (currentPhase === 'collect' && !isDue) {
-        const next = markTarget(lemma, owner)
-        setTargets(next.targets)
+        markTarget(lemma, owner)
       }
       post(lemma, false)
     }
@@ -639,9 +634,11 @@ function StudyDone({
       <p>{text}</p>
       {nextMinutes !== null ? <p className="small muted">Следующее повторение примерно через {nextMinutes} мин.</p> : null}
       <div className="actions" style={{ width: '100%' }}>
-        <button className="btn" onClick={onMore}>
-          Добавить ещё новых
-        </button>
+        {!review ? (
+          <button className="btn" onClick={onMore}>
+            Добавить ещё новых
+          </button>
+        ) : null}
         {review ? (
           <button className="btn ghost" onClick={onLearn}>
             Новые слова

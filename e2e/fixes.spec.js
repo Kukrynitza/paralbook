@@ -106,7 +106,7 @@ test('cancel chat generation', async ({ page }) => {
   await page.goto('http://localhost:5173/chat')
   await page.getByPlaceholder('Тема и время чтения').fill('PW Cancel Chat, 60 минут')
   await page.getByRole('button', { name: 'Отправить' }).click()
-  await expect(page.getByText('Сейчас выполняется: PW Cancel Chat')).toBeVisible({ timeout: 30000 })
+  await expect(page.getByRole('button', { name: 'Отправить' })).toBeDisabled({ timeout: 30000 })
   await page.waitForTimeout(1500)
   await page.getByRole('button', { name: 'Отменить' }).first().click()
   await page.getByRole('dialog', { name: 'Остановить генерацию?' }).getByRole('button', { name: 'Остановить' }).click()

@@ -99,7 +99,11 @@ export function JobProvider({ children }: { children: ReactNode }) {
   }, [jobs])
 
   useEffect(() => {
-    if (!user) return
+    if (!user) {
+      loadedUser.current = null
+      setJobs([])
+      return
+    }
     if (loadedUser.current !== user.id) {
       loadedUser.current = user.id
       setJobs(readStored(user.id))

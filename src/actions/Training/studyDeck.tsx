@@ -181,24 +181,22 @@ export default async function studyDeck(packs: string[], mode: string, daily: nu
   const nextDueAt = seconds > 0 && dueDate ? dueDate.toISOString() : null
   const dueLemmas = due.rows.map((row) => row.lemma).filter(Boolean)
   const reviewWaiting = kind === 'review' && dueLemmas.length === 0 && nextMinutes !== null
-  const freshChosen = kind === 'learn' || kind === 'mixed'
-    ? [...new Set([...chosen, 'own'])]
-    : chosen
   let fresh: string[] = []
   let hasMoreFresh = false
   if (limit > 0 && (extra || kind === 'learn' || kind === 'mixed')) {
-    const batch = await freshLemmas(id, freshChosen, limit + 1)
-    fresh = batch.slice(0, limit)
+    const batch = await freshLemmas(id, chosen, limit + 1)
+    fresh = shuffle(batch.slice(0, limit))
     hasMoreFresh = batch.length > limit
   }
+  const orderedDue = shuffle(dueLemmas)
   let lemmas: string[] = []
   if (extra) lemmas = fresh
   else if (reviewWaiting) lemmas = []
-  else if (kind === 'review') lemmas = dueLemmas
+  else if (kind === 'review') lemmas = orderedDue
   else if (kind === 'learn') lemmas = fresh
   else if (kind === 'mixed') {
     const seen = new Set<string>()
-    lemmas = [...dueLemmas, ...fresh].filter((lemma) => {
+    lemmas = [...orderedDue, ...fresh].filter((lemma) => {
       if (seen.has(lemma)) return false
       seen.add(lemma)
       return true
@@ -210,7 +208,7 @@ export default async function studyDeck(packs: string[], mode: string, daily: nu
   return {
     lemmas,
     fresh,
-    due: dueLemmas,
+    due: orderedDue,
     mode: extra ? 'learn' : kind,
     nextMinutes,
     nextDueAt,
