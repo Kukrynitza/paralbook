@@ -10,14 +10,39 @@ export default async function saveProgress(textId: string, page: number): Promis
     throw new Error('Нужно войти')
   }
   return database.transaction().execute(async (trx) => {
-    const text = await trx.selectFrom('texts').select(['id', 'minutes']).where('id', '=', textId).executeTakeFirst()
-    const entry = await trx
+    const text = await trx
+      .selectFrom('texts')
+      .select(['id', 'minutes', 'published'])
+      .where('id', '=', textId)
+      .executeTakeFirst()
+    if (!text) {
+      throw new Error('Текст не найден')
+    }
+    let entry = await trx
       .selectFrom('collectionItems')
       .select(['id', 'credited'])
       .where('userId', '=', id)
       .where('textId', '=', textId)
       .executeTakeFirst()
-    if (!text || !entry) {
+    if (!entry && text.published) {
+      // Открыли текст из библиотеки: сохраняем его в подборку,
+      // чтобы можно было листать страницы и вести прогресс.
+      entry = await trx
+        .insertInto('collectionItems')
+        .values({ userId: id, textId, source: 'library', progress: 0, credited: false })
+        .onConflict((conflict) => conflict.doNothing())
+        .returning(['id', 'credited'])
+        .executeTakeFirst()
+      if (!entry) {
+        entry = await trx
+          .selectFrom('collectionItems')
+          .select(['id', 'credited'])
+          .where('userId', '=', id)
+          .where('textId', '=', textId)
+          .executeTakeFirst()
+      }
+    }
+    if (!entry) {
       throw new Error('Сначала добавьте текст в подборку')
     }
     const pageCount = await trx

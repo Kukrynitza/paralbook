@@ -11,6 +11,7 @@ export default function ConfirmDialog({
   cancelLabel = 'Отмена',
   busyLabel = 'Подождите…',
   busy,
+  confirmDisabled,
   onConfirm,
   onClose,
 }: {
@@ -21,6 +22,7 @@ export default function ConfirmDialog({
   cancelLabel?: string
   busyLabel?: string
   busy?: boolean
+  confirmDisabled?: boolean
   onConfirm: () => void
   onClose: () => void
 }) {
@@ -45,7 +47,7 @@ export default function ConfirmDialog({
           <button className="btn ghost" disabled={busy} onClick={onClose}>
             {cancelLabel}
           </button>
-          <button className="btn" disabled={busy} onClick={onConfirm}>
+          <button className="btn" disabled={busy || confirmDisabled} onClick={onConfirm}>
             {busy ? busyLabel : confirmLabel}
           </button>
         </div>

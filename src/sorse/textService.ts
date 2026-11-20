@@ -34,6 +34,20 @@ async function serviceFetch(path: string, init: RequestInit = {}, timeoutMs = 30
   return data
 }
 
+export interface LanguageCheck {
+  code: string
+  name: string
+  confidence: number
+  allowed: boolean
+}
+
+export async function checkTextLanguage(text: string) {
+  return (await serviceFetch('/v1/check-language', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  }, 15_000)) as LanguageCheck
+}
+
 export interface TextJob {
   id: string
   userId: string

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree
 
+import py3langid as langid
 from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
 
@@ -418,12 +419,302 @@ def validate_text(text: str) -> str:
     return value
 
 
-def detect_language(text: str) -> str:
+LANGUAGE_NAMES = {
+    "en": "английский",
+    "ru": "русский",
+    "de": "немецкий",
+    "fr": "французский",
+    "es": "испанский",
+    "it": "итальянский",
+    "pt": "португальский",
+    "nl": "нидерландский",
+    "pl": "польский",
+    "uk": "украинский",
+    "be": "белорусский",
+    "bg": "болгарский",
+    "sr": "сербский",
+    "mk": "македонский",
+    "hr": "хорватский",
+    "cs": "чешский",
+    "sk": "словацкий",
+    "sl": "словенский",
+    "ro": "румынский",
+    "hu": "венгерский",
+    "el": "греческий",
+    "tr": "турецкий",
+    "sv": "шведский",
+    "da": "датский",
+    "no": "норвежский",
+    "fi": "финский",
+    "et": "эстонский",
+    "lv": "латышский",
+    "lt": "литовский",
+    "ar": "арабский",
+    "he": "иврит",
+    "hi": "хинди",
+    "ja": "японский",
+    "ko": "корейский",
+    "zh": "китайский",
+    "zh-cn": "китайский",
+    "zh-tw": "китайский",
+    "th": "тайский",
+    "vi": "вьетнамский",
+    "id": "индонезийский",
+    "fa": "персидский",
+}
+
+DETECT_LANGUAGES = [
+    "en", "ru", "de", "fr", "es", "it", "pt", "nl", "pl", "uk", "be", "bg",
+    "sr", "mk", "cs", "sk", "sl", "ro", "hu", "el", "tr", "sv", "da", "no",
+    "fi", "et", "lv", "lt", "ar", "he", "hi", "ja", "ko", "zh", "th", "vi",
+    "id", "fa",
+]
+langid.set_languages(DETECT_LANGUAGES)
+
+ENGLISH_STOPWORDS = {
+    "the", "and", "is", "to", "of", "in", "it", "you", "that", "was", "for", "on",
+    "with", "as", "at", "this", "but", "be", "have", "he", "she", "they", "we",
+    "not", "are", "from", "his", "her", "their", "an", "by", "or", "which", "will",
+    "my", "your", "our", "do", "does", "did", "can", "could", "would", "should",
+    "there", "here", "what", "when", "where", "why", "how", "who", "i", "me",
+}
+
+BULGARIAN_MARKERS = {
+    "това", "тази", "този", "тези", "са", "ще", "какво", "защо", "където",
+    "български", "българският", "език", "които", "който", "която", "което",
+    "има", "няма", "беше", "бил", "била", "било", "също",
+}
+
+UKRAINIAN_MARKERS = {
+    "це", "цей", "ця", "ці", "він", "вона", "вони", "що", "як", "є",
+    "був", "була", "було", "бути", "щоб", "якщо", "який", "яка", "яке",
+    "які", "український", "українська", "українське", "українською",
+    "мова", "мови", "книга", "книги", "слово", "слова", "речення",
+}
+
+BELARUSIAN_MARKERS = {
+    "гэта", "гэты", "гэтая", "гэтыя", "ён", "яна", "яны", "што", "як",
+    "але", "вельмі", "кніга", "кнігі", "словы", "мова", "беларускі",
+    "беларуская", "беларускае", "ёсць", "быў", "была", "было", "быць",
+    "каб", "калі", "які", "якая", "якое", "якія",
+}
+
+SERBIAN_MARKERS = {
+    "ово", "ова", "ови", "је", "су", "сам", "си", "смо", "сте", "што",
+    "који", "која", "које", "речи", "реч", "књига", "књиге", "српски",
+    "српска", "српско", "бити", "био", "била", "било", "али", "веома",
+    "такође",
+}
+
+MACEDONIAN_MARKERS = {
+    "ова", "овој", "оваа", "овие", "што", "кој", "која", "кое", "кои",
+    "зборови", "книга", "книги", "македонски", "македонска", "македонско",
+    "биде", "беше", "бил", "била", "било", "многу",
+}
+
+RUSSIAN_MARKERS = {
+    "это", "этот", "эта", "эти", "его", "мы", "вы", "только", "уже",
+    "был", "была", "было", "были", "быть", "есть", "будет", "будут",
+    "который", "которая", "которые", "русский", "русская", "русское",
+    "язык", "предложение", "столица", "город", "красивый", "большой",
+    "маленький",
+}
+
+CYRILLIC_RE = re.compile(r"[А-Яа-яЁёІіЇїЄєҐґЎўЉљЊњЋћЂђЏџЃѓЌќЅѕ]")
+CYRILLIC_WORDS_RE = re.compile(r"[а-яёіїєґўѓќѕљњћђџ]+")
+UKRAINIAN_RE = re.compile(r"[іїєґ]")
+MACEDONIAN_RE = re.compile(r"[ѓќѕ]")
+SERBIAN_RE = re.compile(r"[љњћђџ]")
+RUSSIAN_LETTERS_RE = re.compile(r"[ыэё]")
+
+
+def _sample_text(text: str, limit: int = 1500, chunks: int = 7) -> str:
+    clean = normalize_text(text or "")
+    if len(clean) <= limit * chunks:
+        return clean
+    last = len(clean) - limit
+    starts = [round(index * last / (chunks - 1)) for index in range(chunks)]
+    return "\n".join(clean[start:start + limit] for start in starts)
+
+
+def _script_counts(text: str) -> tuple[int, int]:
     latin = len(re.findall(r"[A-Za-z]", text or ""))
     cyrillic = len(re.findall(r"[А-Яа-яЁё]", text or ""))
-    if not latin and not cyrillic:
-        return "en"
-    return "ru" if cyrillic > latin else "en"
+    return latin, cyrillic
+
+
+def _rank_language(sample: str) -> tuple[str, float]:
+    try:
+        ranking = langid.rank(sample)
+    except Exception:
+        return "unknown", 0.0
+    if not ranking:
+        return "unknown", 0.0
+    code, score = ranking[0]
+    if score <= -1e30:
+        return "unknown", 0.0
+    if len(ranking) > 1:
+        margin = max(-50.0, min(50.0, float(ranking[1][1]) - float(score)))
+        confidence = round(1.0 / (1.0 + math.exp(margin)), 3)
+    else:
+        confidence = 1.0
+    return code, confidence
+
+
+def _cyrillic_override(text: str, code: str) -> str:
+    lower = text.lower()
+    words = set(CYRILLIC_WORDS_RE.findall(lower))
+    total = len(CYRILLIC_RE.findall(lower))
+    if not total:
+        return code
+    ukrainian = len(UKRAINIAN_RE.findall(lower))
+    belarusian = lower.count("ў")
+    macedonian = len(MACEDONIAN_RE.findall(lower))
+    serbian = len(SERBIAN_RE.findall(lower))
+    foreign = max(ukrainian, belarusian, macedonian, serbian)
+    russian_letters = bool(RUSSIAN_LETTERS_RE.search(lower))
+    russian_words = len(words & RUSSIAN_MARKERS)
+
+    # В русском тексте может встретиться одно украинское/белорусское
+    # название или цитата. Не меняем язык из-за одного такого символа.
+    if code in {"uk", "be"}:
+        if russian_words >= 1 and foreign <= 2:
+            return "ru"
+        if russian_letters and foreign <= 2:
+            return "ru"
+    if code in {"bg", "sr", "mk"}:
+        if russian_words >= 2 and foreign <= 2:
+            return "ru"
+        if code in {"bg", "sr", "mk"} and russian_letters and foreign <= 2:
+            return "ru"
+    if code == "be" and russian_letters and belarusian <= 1 and not (words & BELARUSIAN_MARKERS):
+        return "ru"
+
+    if code == "bg":
+        if words & BULGARIAN_MARKERS:
+            return "bg"
+        if lower.count("ъ") >= 2 and not russian_letters:
+            return "bg"
+        return "ru"
+
+    if code == "uk":
+        if ukrainian >= 1 or words & UKRAINIAN_MARKERS:
+            return "uk"
+        return "ru"
+    if code == "be":
+        if belarusian >= 1 or words & BELARUSIAN_MARKERS:
+            return "be"
+        return "ru"
+    if code == "mk":
+        if macedonian >= 1 or words & MACEDONIAN_MARKERS:
+            return "mk"
+        return "ru"
+    if code == "sr":
+        if serbian >= 1 or words & SERBIAN_MARKERS:
+            return "sr"
+        return "ru"
+
+    if code == "ru":
+        if russian_words:
+            return "ru"
+        if russian_letters:
+            if belarusian >= 2 and words & BELARUSIAN_MARKERS:
+                return "be"
+            return "ru"
+        if ukrainian >= 2 and ukrainian / total >= 0.02 and words & UKRAINIAN_MARKERS:
+            return "uk"
+        if belarusian >= 2 and belarusian / total >= 0.02 and words & BELARUSIAN_MARKERS:
+            return "be"
+        if macedonian >= 2 and macedonian / total >= 0.02 and words & MACEDONIAN_MARKERS:
+            return "mk"
+        if serbian >= 2 and serbian / total >= 0.02 and words & SERBIAN_MARKERS:
+            return "sr"
+        if len(words & BULGARIAN_MARKERS) >= 2:
+            return "bg"
+        return "ru"
+    return code
+
+
+def _english_short_fallback(sample: str) -> bool:
+    words = re.findall(r"[a-z]+", sample.lower())
+    if set(words) & ENGLISH_STOPWORDS:
+        return True
+    letters = len(re.findall(r"[A-Za-z]", sample))
+    return 0 < letters <= 12 and len(words) <= 1 and not re.search(r"[^\x00-\x7F]", sample)
+
+
+def detect_language_info(text: str) -> dict:
+    sample = _sample_text(text)
+    if not sample or not re.search(r"[^\W\d_]", sample, re.UNICODE):
+        return {"code": "unknown", "name": "неизвестный", "confidence": 0.0}
+    latin, cyrillic = _script_counts(sample)
+    code, confidence = _rank_language(sample)
+    if cyrillic > 0:
+        code = _cyrillic_override(sample, code)
+        confidence = max(confidence, 0.5)
+    # Смешанный русско-английский текст: если кириллицы больше, это русский текст.
+    if cyrillic > latin and code not in {"ru", "uk", "be", "bg", "sr", "mk"}:
+        code = "ru"
+        confidence = max(confidence, 0.5)
+    if code != "en" and cyrillic == 0 and confidence < 0.9 and _english_short_fallback(sample):
+        code = "en"
+        confidence = max(confidence, 0.5)
+    return {"code": code, "name": LANGUAGE_NAMES.get(code, code), "confidence": confidence}
+
+
+def detect_language(text: str) -> str:
+    return detect_language_info(text)["code"]
+
+
+def validate_language(text: str, field: str = "Текст", allowed: tuple[str, ...] = ("en", "ru")) -> dict:
+    info = detect_language_info(text)
+    if info["code"] in allowed:
+        return info
+    if info["code"] == "unknown":
+        raise ValueError(
+            f"{field}: не удалось определить язык. Поддерживаются только английский и русский."
+        )
+    raise ValueError(
+        f"{field}: определён {info['name']} ({info['code']}). "
+        "Поддерживаются только английский и русский."
+    )
+
+
+def language_samples_from_pages(pages: list[dict]) -> tuple[str, str]:
+    if not pages:
+        return "", ""
+    indexes = sorted({0, len(pages) // 2, len(pages) - 1})
+    english: list[str] = []
+    russian: list[str] = []
+    for index in indexes:
+        page = pages[index]
+        english.extend(
+            str(item.get("text", ""))
+            for item in page.get("en", [])
+            if str(item.get("text", "")).strip()
+        )
+        russian.extend(
+            str(item.get("text", ""))
+            for item in page.get("ru", [])
+            if str(item.get("text", "")).strip()
+        )
+    return " ".join(english), " ".join(russian)
+
+
+def validate_pages_language(pages: list[dict]) -> None:
+    if not pages:
+        return
+    if len(pages) <= 1000:
+        indexes = range(len(pages))
+    else:
+        last = len(pages) - 1
+        indexes = sorted({round(index * last / 20) for index in range(21)})
+    for index in indexes:
+        english, russian = language_samples_from_pages([pages[index]])
+        if english:
+            validate_language(english, "Основной текст книги", ("en",))
+        if russian:
+            validate_language(russian, "Перевод книги", ("ru",))
 
 
 def title_from_text(text: str, limit: int = 60) -> str:

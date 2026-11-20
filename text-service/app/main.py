@@ -26,8 +26,9 @@ from .config import (
 )
 from .db import Database
 from .dictionary import Dictionary
+from .parsers import detect_language_info, parse_file, validate_language, validate_pages_language
 from .jobs import JobBusy, JobManager
-from .models import ChatJobBody, LlmModelsBody, LlmSaveBody, LlmSettingsView, LlmTestBody, TextImportBody
+from .models import ChatJobBody, LanguageCheckBody, LlmModelsBody, LlmSaveBody, LlmSettingsView, LlmTestBody, TextImportBody
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("text-service")
@@ -124,6 +125,14 @@ async def ensure_text_owner(text_id: str, user_id: str) -> dict:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "version": "1.0.0", "dictionary": dictionary.stats}
+
+
+@app.post("/v1/check-language")
+async def check_language(body: LanguageCheckBody, x_service_token: str | None = Header(default=None)) -> dict:
+    if not internal_ok(x_service_token):
+        raise HTTPException(status_code=401, detail="Нет доступа к сервису")
+    info = detect_language_info(body.text)
+    return {**info, "allowed": info["code"] in ("en", "ru")}
 
 
 @app.get("/v1/tts")
@@ -326,6 +335,14 @@ async def import_file(
         raise HTTPException(status_code=400, detail="Файл пустой")
     if len(data) > MAX_UPLOAD_BYTES and not (file.filename or "").lower().endswith(".2books"):
         raise HTTPException(status_code=413, detail=f"Файл больше {MAX_UPLOAD_BYTES // 1024 // 1024} МБ")
+    try:
+        parsed = parse_file(file.filename or "file", data, dictionary)
+        if parsed.pages is not None:
+            validate_pages_language(parsed.pages)
+        elif parsed.text:
+            validate_language(parsed.text, "Текст книги", ("en", "ru"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     assert jobs is not None
     job = await jobs.create_import_job(user_id=user_id, text_id=text_id, filename=file.filename or "file",
                                        data=data, translate=translate, source=source, language=language,
@@ -350,6 +367,16 @@ async def import_text(body: TextImportBody, authorization: str | None = Header(d
             status_code=400,
             detail=f"Лимит — {MAX_TRANSLATE_CHARS:,} символов на текст. Сократите отрывок или загрузите книгу файлом".replace(",", " "),
         )
+    try:
+        if english and russian:
+            validate_language(english, "Поле «Английский текст»", ("en",))
+            validate_language(russian, "Поле «Русский текст»", ("ru",))
+        elif english:
+            validate_language(english, "Текст", ("en", "ru"))
+        elif russian:
+            validate_language(russian, "Текст", ("ru",))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     unit, size = chunk_settings(body.chunkUnit, body.chunkSize)
     await ensure_text_owner(text_id, user_id)
     assert jobs is not None

@@ -19,7 +19,7 @@ import Pager from '@/components/Pager/Pager'
 import Ring from '@/components/Ring/Ring'
 import Stars from '@/components/Stars/Stars'
 import dayWord from '@/sorse/dayWord'
-import { readResume, type ResumeEntry } from '@/sorse/resume'
+import { clearResume, readResume, type ResumeEntry } from '@/sorse/resume'
 import friendStyles from '@/components/FriendCard/FriendCard.module.css'
 import styles from './page.module.css'
 
@@ -30,7 +30,7 @@ const sorts = [
 ]
 
 export default function Page() {
-  const { confirm, notify } = useUi()
+  const { confirm, notify, notifyError } = useUi()
   const { user } = useAuth()
   const owner = user?.id
   const { revision } = useJobs()
@@ -42,6 +42,7 @@ export default function Page() {
   const [error, setError] = useState('')
   const [publishing, setPublishing] = useState<CollectionItem | null>(null)
   const [publishBusy, setPublishBusy] = useState(false)
+  const [publishConfirm, setPublishConfirm] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -71,12 +72,30 @@ export default function Page() {
   }, [owner])
 
   async function remove(item: CollectionItem) {
-    const ok = await confirm(item.source === 'chat' && !item.published ? 'Удалить текст?' : 'Убрать текст из подборки?')
+    const deleteOwned = !item.published && item.source !== 'library'
+    const ok = await confirm(deleteOwned ? 'Удалить текст?' : 'Убрать текст из подборки?')
     if (!ok) return
-    if (item.source === 'chat' && !item.published) await deleteText(item.textId)
-    else await removeFromCollection(item.id)
-    setList(await selectCollection(sort, page))
-    notify('Сохранено')
+    try {
+      if (deleteOwned) await deleteText(item.textId)
+      else await removeFromCollection(item.id)
+    } catch (reason) {
+      notifyError(reason instanceof Error ? reason.message : 'Не удалось удалить текст')
+      return
+    }
+    if (deleteOwned && resume?.id === item.textId) {
+      clearResume(owner)
+      setResume(null)
+    }
+    try {
+      const [nextList, nextToday] = await Promise.all([selectCollection(sort, page), selectToday()])
+      setPage(nextList.page)
+      setList(nextList)
+      setToday(nextToday)
+    } catch {
+      notifyError('Текст удалён, но список не обновился. Обновите страницу.')
+      return
+    }
+    notify(deleteOwned ? 'Текст удалён' : 'Убрано из подборки')
   }
 
   async function vote(item: CollectionItem, value: number) {
@@ -100,22 +119,41 @@ export default function Page() {
   async function pin(item: CollectionItem) {
     try {
       await pinCollection(item.id)
-      setList(await selectCollection(sort, page))
     } catch (reason: unknown) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось закрепить')
+      notifyError(reason instanceof Error ? reason.message : 'Не удалось закрепить')
+      return
     }
+    try {
+      const nextPage = item.pinned ? page : 1
+      const nextList = await selectCollection(sort, nextPage)
+      setPage(nextList.page)
+      setList(nextList)
+    } catch {
+      notifyError('Список не обновился. Обновите страницу.')
+      return
+    }
+    notify(item.pinned ? 'Откреплено' : 'Закреплено')
   }
 
   async function publish() {
-    if (!publishing) return
+    if (!publishing || !publishConfirm) return
     setPublishBusy(true)
     try {
       await publishCollection(publishing.id)
-      setPublishing(null)
-      setList(await selectCollection(sort, page))
-      notify('Текст опубликован')
     } catch (reason: unknown) {
-      notify(reason instanceof Error ? reason.message : 'Не удалось опубликовать')
+      notifyError(reason instanceof Error ? reason.message : 'Не удалось опубликовать')
+      setPublishBusy(false)
+      return
+    }
+    setPublishing(null)
+    setPublishConfirm(false)
+    notify('Текст опубликован')
+    try {
+      const nextList = await selectCollection(sort, page)
+      setPage(nextList.page)
+      setList(nextList)
+    } catch {
+      notifyError('Текст опубликован, но список не обновился. Обновите страницу.')
     } finally {
       setPublishBusy(false)
     }
@@ -237,11 +275,15 @@ export default function Page() {
           {list?.items.map((item) => (
             <article className="card" key={item.id}>
               <div className="row">
-                <span className="badge">{item.source === 'chat' && !item.published ? 'Создано в чате' : 'Библиотека'}</span>
+                <span className="badge">
+                  {item.published ? 'Библиотека' : item.source === 'chat' ? 'Создано в чате' : 'Загружено'}
+                </span>
                 <button
                   type="button"
                   className={item.pinned ? styles.pinOn : styles.pin}
                   aria-label={item.pinned ? 'Открепить' : 'Закрепить'}
+                  aria-pressed={item.pinned}
+                  title={item.pinned ? 'Открепить' : 'Закрепить'}
                   onClick={() => pin(item)}
                 >
                   <Pin size={16} fill={item.pinned ? 'currentColor' : 'none'} />
@@ -258,9 +300,15 @@ export default function Page() {
                 <span>{item.topic}</span>
                 {item.published ? <PublishedBadge /> : null}
               </div>
-              {item.source === 'chat' && !item.published ? (
+              {!item.published ? (
                 <div className="actions">
-                  <button className="btn ghost wrap" onClick={() => setPublishing(item)}>
+                  <button
+                    className="btn ghost wrap"
+                    onClick={() => {
+                      setPublishConfirm(false)
+                      setPublishing(item)
+                    }}
+                  >
                     Опубликовать в библиотеку
                   </button>
                   <button className="btn danger slim" onClick={() => remove(item)}>
@@ -285,7 +333,11 @@ export default function Page() {
         confirmLabel="Опубликовать"
         busyLabel="Публикую…"
         busy={publishBusy}
-        onClose={() => setPublishing(null)}
+        confirmDisabled={!publishConfirm}
+        onClose={() => {
+          setPublishing(null)
+          setPublishConfirm(false)
+        }}
         onConfirm={() => void publish()}
       >
         <p>Текст появится в общей библиотеке и станет виден другим пользователям.</p>
@@ -294,6 +346,17 @@ export default function Page() {
           <li>он попадёт в поиск и рейтинг библиотеки;</li>
           <li>убрать текст из библиотеки после публикации нельзя.</li>
         </ul>
+        <label className="row small" style={{ justifyContent: 'flex-start', alignItems: 'flex-start' }}>
+          <input
+            type="checkbox"
+            checked={publishConfirm}
+            onChange={(event) => setPublishConfirm(event.target.checked)}
+            style={{ marginTop: 2 }}
+          />
+          <span>
+            Подтверждаю, что текст не содержит непристойного, оскорбительного или запрещённого контента.
+          </span>
+        </label>
       </ConfirmDialog>
     </div>
   )

@@ -200,21 +200,25 @@ export default function Page() {
   }, [hit, page])
 
   async function onToken(index: number, lemma: string, translation?: string, align?: number, ruAlign?: number) {
-    if (!data?.hasTranslation) {
-      const word = await selectWord(lemma)
-      setEntry(word)
-      setSaved(Boolean(word.saved))
-      setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
-      return
+    try {
+      if (!data?.hasTranslation) {
+        const word = await selectWord(lemma)
+        setEntry(word)
+        setSaved(Boolean(word.saved))
+        setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
+        return
+      }
+      if (pick?.index === index && pick.phase === 'gloss') {
+        const word = await selectWord(lemma)
+        setEntry(word)
+        setSaved(Boolean(word.saved))
+        setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
+        return
+      }
+      setPick({ index, lemma, translation, align, ruAlign, phase: 'gloss' })
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : 'Не удалось открыть слово')
     }
-    if (pick?.index === index && pick.phase === 'gloss') {
-      const word = await selectWord(lemma)
-      setEntry(word)
-      setSaved(Boolean(word.saved))
-      setPick({ index, lemma, translation, align, ruAlign, phase: 'popup' })
-      return
-    }
-    setPick({ index, lemma, translation, align, ruAlign, phase: 'gloss' })
   }
 
   async function addWord() {

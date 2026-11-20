@@ -10,9 +10,24 @@ from .align import align_pages
 from .config import MAX_TRANSLATE_CHARS, MIN_UPLOAD_TEXT, WORDS_PER_MINUTE
 from .db import Database
 from .dictionary import Dictionary
-from .parsers import Parsed, detect_language, normalize_text, parse_file, title_from_text, validate_text
+from .parsers import (
+    Parsed,
+    detect_language_info,
+    normalize_text,
+    parse_file,
+    title_from_text,
+    validate_language,
+    validate_pages_language,
+    validate_text,
+)
 
 log = logging.getLogger("text-service.jobs")
+
+
+def validate_output_language(text: str, field: str, allowed: tuple[str, ...]) -> None:
+    value = (text or "").strip()
+    if len(value) >= 80:
+        validate_language(value, field, allowed)
 
 
 class JobBusy(Exception):
@@ -191,6 +206,15 @@ class JobManager:
                         raise ValueError("В русском тексте слишком мало текста")
                 if not english and not russian_text:
                     raise ValueError("Введите английский или русский текст")
+            if parsed and parsed.pages is not None:
+                validate_pages_language(parsed.pages)
+            elif english and russian_text:
+                validate_language(english, "Поле «Английский текст»", ("en",))
+                validate_language(russian_text, "Поле «Русский текст»", ("ru",))
+            elif english:
+                validate_language(english, "Текст", ("en", "ru"))
+            elif russian_text:
+                validate_language(russian_text, "Текст", ("ru",))
             await self._update(job_id, stage="aligning", progress=25)
             text_row = await self.db.get_text(text_id) or {}
             if parsed and parsed.pages is not None:
@@ -216,7 +240,7 @@ class JobManager:
                     "warnings": parsed.warnings,
                 })
                 return
-            detected = language if language in ("en", "ru") else detect_language(english or russian_text)
+            detected = detect_language_info(english or russian_text)["code"]
 
             async def progress(value_: int) -> None:
                 await self._update(job_id, progress=max(30, min(80, value_)))
@@ -236,6 +260,7 @@ class JobManager:
                     config, russian_text, progress=progress, direction="ru-en",
                     unit=chunk_unit, size=chunk_size,
                 )
+                validate_output_language(english, "Перевод на английский", ("en",))
             elif english and translate:
                 if detected == "ru":
                     if len(english) > MAX_TRANSLATE_CHARS:
@@ -250,6 +275,7 @@ class JobManager:
                         config, russian_text, progress=progress, direction="ru-en",
                         unit=chunk_unit, size=chunk_size,
                     )
+                    validate_output_language(english, "Перевод на английский", ("en",))
                 elif len(english) <= MAX_TRANSLATE_CHARS:
                     await self._update(job_id, stage="translating", progress=30)
                     config = await llm.load_config(self.db, user_id)
@@ -257,6 +283,7 @@ class JobManager:
                         config, english, progress=progress, direction="en-ru",
                         unit=chunk_unit, size=chunk_size,
                     )
+                    validate_output_language(russian_text, "Перевод на русский", ("ru",))
                 else:
                     raise ValueError(
                         f"Текст длиннее {MAX_TRANSLATE_CHARS:,} символов — автоматический перевод недоступен. ".replace(",", " ")
@@ -305,6 +332,8 @@ class JobManager:
             async def progress(value: int) -> None:
                 await self._update(job_id, progress=max(5, min(80, value)))
             generated = await llm.generate_chat_text(self.db, user_id, topic, minutes, level, progress=progress)
+            validate_language(generated["english"], "Сгенерированный текст", ("en",))
+            validate_output_language(generated["russian"], "Сгенерированный перевод", ("ru",))
             self._abort_if_cancelled(job_id)
             await self._update(job_id, stage="aligning", progress=85)
             pages = align_pages(generated["english"], generated["russian"], self.dictionary)

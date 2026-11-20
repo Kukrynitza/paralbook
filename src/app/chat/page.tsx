@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { BookOpen, Clock, FilePlus, Globe, Sparkles, Trash2 } from 'lucide-react'
 import { maxValue, minLength, minValue, number, picklist, pipe, safeParse, string, trim } from 'valibot'
@@ -8,8 +8,7 @@ import deleteChatMessage from '@/actions/Chat/deleteChatMessage'
 import generateText from '@/actions/Chat/generateText'
 import selectChat from '@/actions/Chat/selectChat'
 import syncChatJobs from '@/actions/Chat/syncChatJobs'
-import selectCollection from '@/actions/Collection/selectCollection'
-import publishCollection from '@/actions/Collection/publishCollection'
+import publishText from '@/actions/Collection/publishText'
 import deleteText from '@/actions/Reading/deleteText'
 import { LEVELS, type Cefr, type ChatMessage, type LlmSettingsView } from '@/sorse/types'
 import { useAuth, useUi } from '@/contexts/AuthContext'
@@ -62,7 +61,9 @@ export default function Page() {
   const [activeJob, setActiveJob] = useState<string | null>(null)
   const [publishingId, setPublishingId] = useState<string | null>(null)
   const [publishBusy, setPublishBusy] = useState(false)
+  const [publishConfirm, setPublishConfirm] = useState(false)
   const [llm, setLlm] = useState<LlmSettingsView | null | undefined>(undefined)
+  const [llmRetrying, setLlmRetrying] = useState(false)
   const seenJob = useRef(false)
 
   useEffect(() => {
@@ -84,6 +85,22 @@ export default function Page() {
     setLlm(value)
     return value
   }
+
+  const retryService = useCallback(async () => {
+    setLlmRetrying(true)
+    try {
+      setLlm(await readLlmSettings())
+    } finally {
+      setLlmRetrying(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (llm !== null) return
+    const retry = () => void retryService()
+    window.addEventListener('focus', retry)
+    return () => window.removeEventListener('focus', retry)
+  }, [llm, retryService])
 
   async function load() {
     const data = await selectChat()
@@ -213,9 +230,14 @@ export default function Page() {
     if (!ok) return
     try {
       await deleteChatMessage(messageId)
-      await load()
     } catch (reason) {
       notifyError(reason instanceof Error ? reason.message : 'Не удалось удалить')
+      return
+    }
+    try {
+      await load()
+    } catch {
+      notifyError('Запрос удалён, но чат не обновился. Обновите страницу.')
     }
   }
 
@@ -224,25 +246,34 @@ export default function Page() {
     if (!ok) return
     try {
       await deleteText(textId)
-      await load()
     } catch (reason) {
       notifyError(reason instanceof Error ? reason.message : 'Не удалось удалить')
+      return
+    }
+    try {
+      await load()
+    } catch {
+      notifyError('Текст удалён, но чат не обновился. Обновите страницу.')
     }
   }
 
   async function publish() {
-    if (!publishingId) return
+    if (!publishingId || !publishConfirm) return
     setPublishBusy(true)
     try {
-      const list = await selectCollection('new', 1)
-      const entry = list.items.find((item) => item.textId === publishingId)
-      if (!entry) throw new Error('В подборке нет такого текста')
-      await publishCollection(entry.id)
-      setPublishingId(null)
-      await load()
-      notify('Текст опубликован')
+      await publishText(publishingId)
     } catch (reason) {
       notifyError(reason instanceof Error ? reason.message : 'Не удалось опубликовать')
+      setPublishBusy(false)
+      return
+    }
+    setPublishingId(null)
+    setPublishConfirm(false)
+    notify('Текст опубликован')
+    try {
+      await load()
+    } catch {
+      notifyError('Текст опубликован, но чат не обновился. Обновите страницу.')
     } finally {
       setPublishBusy(false)
     }
@@ -344,7 +375,7 @@ export default function Page() {
                 </Link>
                 {card.published ? null : (
                   <>
-                    <button className="btn soft slim" onClick={() => setPublishingId(card.id)}>
+                    <button className="btn soft slim" onClick={() => { setPublishConfirm(false); setPublishingId(card.id) }}>
                       <Globe size={14} />
                       Опубликовать в библиотеку
                     </button>
@@ -382,7 +413,7 @@ export default function Page() {
         </div>
       ) : serviceDown ? (
         <div className={styles.notice}>
-          <LlmNotice kind="service" />
+          <LlmNotice kind="service" onRetry={retryService} retrying={llmRetrying} />
         </div>
       ) : null}
       <form
@@ -407,15 +438,26 @@ export default function Page() {
         confirmLabel="Опубликовать"
         busyLabel="Публикую…"
         busy={publishBusy}
-        onClose={() => setPublishingId(null)}
+        confirmDisabled={!publishConfirm}
+        onClose={() => { setPublishingId(null); setPublishConfirm(false) }}
         onConfirm={() => void publish()}
       >
         <p>Текст появится в общей библиотеке и станет виден другим пользователям.</p>
-        <ul>
-          <li>его смогут читать, оценивать и добавлять в свою подборку;</li>
-          <li>он попадёт в поиск и рейтинг библиотеки;</li>
-          <li>убрать текст из библиотеки после публикации нельзя.</li>
-        </ul>
+        <p className="small muted">
+          Текст смогут читать, оценивать и добавлять в свою подборку. Он попадёт в поиск и рейтинг библиотеки;
+          убрать его из библиотеки после публикации нельзя.
+        </p>
+        <label className="row small" style={{ justifyContent: 'flex-start', alignItems: 'flex-start' }}>
+          <input
+            type="checkbox"
+            checked={publishConfirm}
+            onChange={(event) => setPublishConfirm(event.target.checked)}
+            style={{ marginTop: 2 }}
+          />
+          <span>
+            Подтверждаю, что текст не содержит непристойного, оскорбительного или запрещённого контента.
+          </span>
+        </label>
       </ConfirmDialog>
     </div>
   )

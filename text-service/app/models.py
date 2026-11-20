@@ -56,3 +56,7 @@ class LlmSettingsView(BaseModel):
     source: Literal["user", "env", "none"] = "none"
     envModel: str | None = None
     tableReady: bool = True
+
+
+class LanguageCheckBody(BaseModel):
+    text: str = ""
