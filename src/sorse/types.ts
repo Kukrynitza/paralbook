@@ -76,6 +76,7 @@ export interface CollectionItem {
   level: Cefr
   topic: string
   rating: number | null
+  ratingCount: number
   score: number | null
   progress: number
   pinned: boolean
@@ -90,6 +91,7 @@ export interface LibraryItem {
   level: Cefr
   topic: string
   rating: number | null
+  ratingCount: number
   score: number | null
   saved: boolean
   createdAt: string

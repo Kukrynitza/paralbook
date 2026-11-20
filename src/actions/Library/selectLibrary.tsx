@@ -30,6 +30,7 @@ export default async function selectLibrary(query: string, sort: string, page: n
       'topic',
       'createdAt',
       sql<number | null>`(select avg(score)::float8 from votes where text_id = texts.id)`.as('rating'),
+      sql<number>`(select count(*)::int from votes where text_id = texts.id)`.as('ratingCount'),
     ])
     .where('published', '=', true)
     .where('ready', '=', true)
@@ -66,6 +67,7 @@ export default async function selectLibrary(query: string, sort: string, page: n
       level: row.level,
       topic: row.topic,
       rating: row.rating == null ? null : Math.round(Number(row.rating) * 10) / 10,
+      ratingCount: Number(row.ratingCount),
       score: mine.get(row.id) ?? null,
       saved: savedIds.has(row.id),
       createdAt: new Date(row.createdAt).toISOString(),

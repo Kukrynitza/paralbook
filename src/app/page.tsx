@@ -106,7 +106,7 @@ export default function Page() {
           ? {
               ...current,
               items: current.items.map((entry) =>
-                entry.textId === item.textId ? { ...entry, rating: next.rating, score: next.score } : entry,
+                entry.textId === item.textId ? { ...entry, rating: next.rating, ratingCount: next.ratingCount, score: next.score } : entry,
               ),
             }
           : current,
@@ -294,7 +294,7 @@ export default function Page() {
               </h3>
               <p className={styles.excerpt}>{item.excerpt}</p>
               <div className="meta">
-                <Stars average={item.rating} mine={item.score} onPick={(value) => vote(item, value)} />
+                <Stars average={item.rating} mine={item.score} count={item.ratingCount} onPick={(value) => vote(item, value)} />
                 <span>{(item.progress * 100).toFixed(2)}%</span>
                 <span>{item.minutes} мин · {item.level}</span>
                 <span>{item.topic}</span>

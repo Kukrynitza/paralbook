@@ -41,6 +41,7 @@ export default async function voteLibrary(textId: string, score: number) {
   return {
     textId,
     rating: averageScore(votes.map((item) => Number(item.score))),
+    ratingCount: votes.length,
     score: mine ? Number(mine.score) : null,
   }
 }

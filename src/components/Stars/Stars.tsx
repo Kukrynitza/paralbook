@@ -1,16 +1,22 @@
 import { Star } from 'lucide-react'
+import { ratingSummary } from '@/sorse/rating'
 import styles from './Stars.module.css'
 
 export default function Stars({
   average,
   mine,
+  count,
   onPick,
 }: {
   average: number | null
   mine: number | null
+  count?: number
   onPick?: (value: number) => void
 }) {
   const fill = mine ?? 0
+  const label = count == null
+    ? average == null ? null : average.toFixed(1)
+    : ratingSummary(average, count)
   return (
     <span className={styles.row}>
       {[1, 2, 3, 4, 5].map((value) => (
@@ -25,7 +31,7 @@ export default function Stars({
           <Star size={16} fill={value <= fill ? 'currentColor' : 'none'} />
         </button>
       ))}
-      {average == null ? null : <span className={styles.avg}>{average.toFixed(1)}</span>}
+      {label == null ? null : <span className={styles.avg}>{label}</span>}
     </span>
   )
 }

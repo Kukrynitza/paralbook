@@ -7,6 +7,7 @@ import saveLibrary from '@/actions/Library/saveLibrary'
 import selectLibrary from '@/actions/Library/selectLibrary'
 import voteLibrary from '@/actions/Library/voteLibrary'
 import { type LibraryItem, type PageResult } from '@/sorse/types'
+import { ratingSummary } from '@/sorse/rating'
 import { useUi } from '@/contexts/AuthContext'
 import Pager from '@/components/Pager/Pager'
 import Stars from '@/components/Stars/Stars'
@@ -51,7 +52,7 @@ export default function Page() {
           ? {
               ...current,
               items: current.items.map((entry) =>
-                entry.id === item.id ? { ...entry, rating: next.rating, score: next.score } : entry,
+                entry.id === item.id ? { ...entry, rating: next.rating, ratingCount: next.ratingCount, score: next.score } : entry,
               ),
             }
           : current,
@@ -145,9 +146,11 @@ export default function Page() {
               <p>{item.excerpt}</p>
               <div className="meta">
                 {item.saved ? (
-                  <Stars average={item.rating} mine={item.score} onPick={(value) => vote(item, value)} />
-                ) : item.rating == null ? null : (
-                  <span>★ {item.rating.toFixed(1)}</span>
+                  <Stars average={item.rating} mine={item.score} count={item.ratingCount} onPick={(value) => vote(item, value)} />
+                ) : item.ratingCount ? (
+                  <span>★ {ratingSummary(item.rating, item.ratingCount)}</span>
+                ) : (
+                  <span>Нет оценок</span>
                 )}
                 <span>{item.minutes} мин</span>
                 <span>{item.topic}</span>

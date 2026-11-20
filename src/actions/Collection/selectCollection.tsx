@@ -38,6 +38,7 @@ export default async function selectCollection(sort: string, page: number): Prom
       'texts.topic',
       'texts.published',
       sql<number | null>`(select avg(score)::float8 from votes where text_id = collection_items.text_id)`.as('rating'),
+      sql<number>`(select count(*)::int from votes where text_id = collection_items.text_id)`.as('ratingCount'),
       sql<number | null>`(select score from votes where text_id = collection_items.text_id and user_id = ${id})`.as('mine'),
     ])
     .where('collectionItems.userId', '=', id)
@@ -61,6 +62,7 @@ export default async function selectCollection(sort: string, page: number): Prom
       level: row.level,
       topic: row.topic,
       rating: row.rating == null ? null : Math.round(Number(row.rating) * 10) / 10,
+      ratingCount: Number(row.ratingCount),
       score: row.mine == null ? null : Number(row.mine),
       progress: Number(row.progress),
       pinned: row.pinned,
